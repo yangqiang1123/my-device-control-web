@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>设备管理中心 - Web 控制台</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
@@ -26,6 +26,11 @@
     .cmd-detail-enter-active, .cmd-detail-leave-active { transition: all 0.2s ease; overflow: hidden; }
     .cmd-detail-enter-from, .cmd-detail-leave-to { max-height: 0; opacity: 0; }
     .cmd-detail-enter-to, .cmd-detail-leave-from { max-height: 500px; opacity: 1; }
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+    @media (max-width: 767px) {
+      .mobile-toast { top: 0.5rem; right: 0.5rem; left: 0.5rem; }
+      .mobile-toast > div { max-width: 100%; }
+    }
   </style>
   <script>
     tailwind.config = {
@@ -43,20 +48,20 @@
 <body class="bg-gray-950 text-gray-100 min-h-screen">
 <div id="app" v-cloak>
   <!-- Toast -->
-  <div class="fixed top-4 right-4 z-50 space-y-2">
+  <div class="fixed top-2 right-2 left-2 md:left-auto md:top-4 md:right-4 z-50 space-y-2">
     <transition-group name="toast">
       <div v-for="toast in toasts" :key="toast.id"
-           :class="['px-4 py-3 rounded-lg shadow-lg text-sm max-w-sm flex items-center gap-2',
+           :class="['px-3 md:px-4 py-2.5 md:py-3 rounded-lg shadow-lg text-xs md:text-sm md:max-w-sm flex items-center gap-2',
              toast.type === 'success' ? 'bg-emerald-600' : toast.type === 'error' ? 'bg-red-600' : 'bg-blue-600']">
         <span>{{ toast.type === 'success' ? '✓' : toast.type === 'error' ? '✗' : 'ℹ' }}</span>
-        {{ toast.message }}
+        <span class="truncate">{{ toast.message }}</span>
       </div>
     </transition-group>
   </div>
 
   <div class="flex h-screen">
-    <!-- Sidebar -->
-    <aside class="w-56 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0">
+    <!-- Sidebar (desktop only) -->
+    <aside class="w-56 bg-gray-900 border-r border-gray-800 hidden md:flex flex-col shrink-0">
       <div class="p-4 border-b border-gray-800">
         <h1 class="text-lg font-bold text-white flex items-center gap-2">
           <span class="text-2xl">🖥️</span> 控制台
@@ -89,26 +94,27 @@
     </aside>
 
     <!-- Main Content -->
-    <main class="flex-1 overflow-y-auto">
+    <main class="flex-1 overflow-y-auto pb-16 md:pb-0">
 
       <!-- ==================== Dashboard ==================== -->
-      <div v-if="currentPage === 'dashboard'" class="p-6 max-w-5xl mx-auto">
-        <h2 class="text-xl font-bold mb-6">仪表板</h2>
+      <div v-if="currentPage === 'dashboard'" class="p-4 md:p-6 max-w-5xl mx-auto">
+        <h2 class="text-lg md:text-xl font-bold mb-4 md:mb-6">仪表板</h2>
 
         <!-- Connection Status -->
-        <div :class="['rounded-xl p-5 mb-6 border', desktopOnline ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-gray-900 border-gray-800']">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div :class="['w-10 h-10 rounded-full flex items-center justify-center text-xl',
+        <div :class="['rounded-xl p-4 md:p-5 mb-4 md:mb-6 border', desktopOnline ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-gray-900 border-gray-800']">
+          <div class="flex items-start md:items-center justify-between gap-2">
+            <div class="flex items-start md:items-center gap-3 min-w-0">
+              <div :class="['w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center text-base md:text-xl shrink-0',
                 desktopOnline ? 'bg-emerald-500/20' : 'bg-gray-800']">
                 {{ desktopOnline ? '🟢' : '🔴' }}
               </div>
-              <div>
-                <div class="font-medium">{{ desktopOnline ? '桌面应用在线' : '桌面应用离线' }}</div>
-                <div class="text-xs text-gray-500 mt-0.5">
+              <div class="min-w-0">
+                <div class="font-medium text-sm md:text-base">{{ desktopOnline ? '桌面应用在线' : '桌面应用离线' }}</div>
+                <div class="text-xs text-gray-500 mt-0.5 break-words">
                   <template v-if="heartbeatData">
                     最后心跳: {{ formatTime(heartbeatData.timestamp) }}
-                    <span v-if="heartbeatData.devices_count !== undefined"> · {{ heartbeatData.devices_count }} 台设备</span>
+                    <br class="md:hidden" />
+                    <span v-if="heartbeatData.devices_count !== undefined">{{ heartbeatData.devices_count }} 台设备</span>
                     <span v-if="heartbeatData.workspaces_count !== undefined"> · {{ heartbeatData.workspaces_count }} 个工作区</span>
                     <span v-if="heartbeatData.active_tasks !== undefined"> · {{ heartbeatData.active_tasks }} 个活跃任务</span>
                   </template>
@@ -116,44 +122,44 @@
                 </div>
               </div>
             </div>
-            <button @click="checkHeartbeat" class="text-xs text-brand-500 hover:text-brand-400">刷新</button>
+            <button @click="checkHeartbeat" class="text-xs text-brand-500 hover:text-brand-400 shrink-0">刷新</button>
           </div>
         </div>
 
         <!-- Stats Cards -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <div class="text-2xl font-bold text-yellow-400">{{ stats.pending }}</div>
-            <div class="text-xs text-gray-500 mt-1">等待中</div>
+        <div class="grid grid-cols-4 gap-2 md:gap-4 mb-4 md:mb-6">
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 text-center md:text-left">
+            <div class="text-xl md:text-2xl font-bold text-yellow-400">{{ stats.pending }}</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1">等待中</div>
           </div>
-          <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <div class="text-2xl font-bold text-blue-400">{{ stats.running }}</div>
-            <div class="text-xs text-gray-500 mt-1">执行中</div>
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 text-center md:text-left">
+            <div class="text-xl md:text-2xl font-bold text-blue-400">{{ stats.running }}</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1">执行中</div>
           </div>
-          <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <div class="text-2xl font-bold text-emerald-400">{{ stats.success }}</div>
-            <div class="text-xs text-gray-500 mt-1">成功</div>
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 text-center md:text-left">
+            <div class="text-xl md:text-2xl font-bold text-emerald-400">{{ stats.success }}</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1">成功</div>
           </div>
-          <div class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <div class="text-2xl font-bold text-red-400">{{ stats.failed }}</div>
-            <div class="text-xs text-gray-500 mt-1">失败</div>
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 text-center md:text-left">
+            <div class="text-xl md:text-2xl font-bold text-red-400">{{ stats.failed }}</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1">失败</div>
           </div>
         </div>
 
         <!-- Recent Activity -->
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="font-medium">最近操作</h3>
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 md:p-5">
+          <div class="flex items-center justify-between mb-3 md:mb-4">
+            <h3 class="font-medium text-sm md:text-base">最近操作</h3>
             <button @click="currentPage = 'history'" class="text-xs text-brand-500 hover:text-brand-400">查看全部</button>
           </div>
-          <div v-if="recentCommands.length === 0" class="text-center py-8 text-gray-500 text-sm">暂无操作记录</div>
-          <div v-else class="space-y-2">
+          <div v-if="recentCommands.length === 0" class="text-center py-6 md:py-8 text-gray-500 text-sm">暂无操作记录</div>
+          <div v-else class="space-y-1 md:space-y-2">
             <div v-for="cmd in recentCommands" :key="cmd.id"
-                 class="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-gray-800/50 transition-colors">
-              <div class="flex items-center gap-3 min-w-0">
+                 class="flex items-center justify-between py-2 px-2 md:px-3 rounded-lg hover:bg-gray-800/50 transition-colors">
+              <div class="flex items-center gap-2 md:gap-3 min-w-0">
                 <span :class="statusDotClass(cmd.status)"></span>
-                <span class="text-sm font-medium truncate">{{ actionLabel(cmd.action) }}</span>
-                <span v-if="cmd.workspace_name" class="text-xs text-gray-500 truncate">[{{ cmd.workspace_no }}] {{ cmd.workspace_name }}</span>
+                <span class="text-xs md:text-sm font-medium truncate">{{ actionLabel(cmd.action) }}</span>
+                <span v-if="cmd.workspace_name" class="text-xs text-gray-500 truncate hidden sm:inline">[{{ cmd.workspace_no }}] {{ cmd.workspace_name }}</span>
               </div>
               <span class="text-xs text-gray-500 shrink-0 ml-2">{{ formatTimeShort(cmd.created_at) }}</span>
             </div>
@@ -161,31 +167,31 @@
         </div>
 
         <!-- Quick Actions -->
-        <div class="mt-6">
-          <h3 class="font-medium mb-3">快捷入口</h3>
-          <div class="grid grid-cols-3 gap-3">
-            <button @click="currentPage = 'ops'" class="p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-brand-500/50 transition-all text-left">
-              <div class="text-2xl mb-1">🎮</div>
-              <div class="text-sm font-medium">发送命令</div>
+        <div class="mt-4 md:mt-6">
+          <h3 class="font-medium text-sm md:text-base mb-3">快捷入口</h3>
+          <div class="grid grid-cols-3 gap-2 md:gap-3">
+            <button @click="currentPage = 'ops'" class="p-3 md:p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-brand-500/50 transition-all text-center md:text-left">
+              <div class="text-xl md:text-2xl mb-1">🎮</div>
+              <div class="text-xs md:text-sm font-medium">发送命令</div>
             </button>
-            <button @click="currentPage = 'workspaces'" class="p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-brand-500/50 transition-all text-left">
-              <div class="text-2xl mb-1">📦</div>
-              <div class="text-sm font-medium">工作区</div>
+            <button @click="currentPage = 'workspaces'" class="p-3 md:p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-brand-500/50 transition-all text-center md:text-left">
+              <div class="text-xl md:text-2xl mb-1">📦</div>
+              <div class="text-xs md:text-sm font-medium">工作区</div>
             </button>
-            <button @click="currentPage = 'settings'" class="p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-brand-500/50 transition-all text-left">
-              <div class="text-2xl mb-1">⚙️</div>
-              <div class="text-sm font-medium">设置</div>
+            <button @click="currentPage = 'settings'" class="p-3 md:p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-brand-500/50 transition-all text-center md:text-left">
+              <div class="text-xl md:text-2xl mb-1">⚙️</div>
+              <div class="text-xs md:text-sm font-medium">设置</div>
             </button>
           </div>
         </div>
       </div>
 
       <!-- ==================== Operations ==================== -->
-      <div v-if="currentPage === 'ops'" class="p-6 max-w-5xl mx-auto">
-        <h2 class="text-xl font-bold mb-6">快捷操作</h2>
+      <div v-if="currentPage === 'ops'" class="p-4 md:p-6 max-w-5xl mx-auto">
+        <h2 class="text-lg md:text-xl font-bold mb-4 md:mb-6">快捷操作</h2>
 
         <!-- Workspace Selector -->
-        <div class="mb-6 bg-gray-900 rounded-xl p-4 border border-gray-800">
+        <div class="mb-4 md:mb-6 bg-gray-900 rounded-xl p-3 md:p-4 border border-gray-800">
           <div class="flex items-center justify-between mb-2">
             <label class="text-sm text-gray-400">选择工作区</label>
             <button v-if="workspaces.length > 0" @click="selectedWorkspace = null" class="text-xs text-gray-500 hover:text-gray-300">清除选择</button>
@@ -207,52 +213,52 @@
         </div>
 
         <!-- Action Buttons -->
-        <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+        <div class="grid grid-cols-3 gap-2 md:gap-4 mb-4 md:mb-6">
           <button @click="executeAction('sync')" :disabled="!selectedWorkspace || sending"
-                  class="group p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-            <div class="text-3xl mb-2">🔄</div>
-            <div class="font-medium text-gray-200 group-hover:text-emerald-300">Repo 同步</div>
-            <div class="text-xs text-gray-500 mt-1">同步选中工作区代码</div>
+                  class="group p-3 md:p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-center">
+            <div class="text-2xl md:text-3xl mb-1 md:mb-2">🔄</div>
+            <div class="text-xs md:text-base font-medium text-gray-200 group-hover:text-emerald-300">同步</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1 hidden md:block">同步选中工作区代码</div>
           </button>
 
           <button @click="executeAction('force-sync')" :disabled="!selectedWorkspace || sending"
-                  class="group p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-orange-500/50 hover:bg-orange-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-            <div class="text-3xl mb-2">⚡</div>
-            <div class="font-medium text-gray-200 group-hover:text-orange-300">强制同步</div>
-            <div class="text-xs text-gray-500 mt-1">强制 repo sync</div>
+                  class="group p-3 md:p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-orange-500/50 hover:bg-orange-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-center">
+            <div class="text-2xl md:text-3xl mb-1 md:mb-2">⚡</div>
+            <div class="text-xs md:text-base font-medium text-gray-200 group-hover:text-orange-300">强制同步</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1 hidden md:block">强制 repo sync</div>
           </button>
 
           <button @click="showBuildDialog = true" :disabled="!selectedWorkspace || sending"
-                  class="group p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-blue-500/50 hover:bg-blue-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-            <div class="text-3xl mb-2">🔨</div>
-            <div class="font-medium text-gray-200 group-hover:text-blue-300">编译构建</div>
-            <div class="text-xs text-gray-500 mt-1">执行构建脚本</div>
+                  class="group p-3 md:p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-blue-500/50 hover:bg-blue-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-center">
+            <div class="text-2xl md:text-3xl mb-1 md:mb-2">🔨</div>
+            <div class="text-xs md:text-base font-medium text-gray-200 group-hover:text-blue-300">构建</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1 hidden md:block">执行构建脚本</div>
           </button>
 
           <button @click="showCherryDialog = true" :disabled="!selectedWorkspace || sending"
-                  class="group p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-purple-500/50 hover:bg-purple-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-            <div class="text-3xl mb-2">🍒</div>
-            <div class="font-medium text-gray-200 group-hover:text-purple-300">Cherry-Pick</div>
-            <div class="text-xs text-gray-500 mt-1">Gerrit 变更拣选</div>
+                  class="group p-3 md:p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-purple-500/50 hover:bg-purple-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-center">
+            <div class="text-2xl md:text-3xl mb-1 md:mb-2">🍒</div>
+            <div class="text-xs md:text-base font-medium text-gray-200 group-hover:text-purple-300">Cherry-Pick</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1 hidden md:block">Gerrit 变更拣选</div>
           </button>
 
           <button @click="showCustomDialog = true" :disabled="!selectedWorkspace || sending"
-                  class="group p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-            <div class="text-3xl mb-2">⌨️</div>
-            <div class="font-medium text-gray-200 group-hover:text-cyan-300">自定义命令</div>
-            <div class="text-xs text-gray-500 mt-1">执行任意 shell 命令</div>
+                  class="group p-3 md:p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-center">
+            <div class="text-2xl md:text-3xl mb-1 md:mb-2">⌨️</div>
+            <div class="text-xs md:text-base font-medium text-gray-200 group-hover:text-cyan-300">自定义</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1 hidden md:block">执行任意 shell 命令</div>
           </button>
 
           <button @click="showJenkinsDialog = true" :disabled="sending"
-                  class="group p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-yellow-500/50 hover:bg-yellow-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
-            <div class="text-3xl mb-2">🏗️</div>
-            <div class="font-medium text-gray-200 group-hover:text-yellow-300">Jenkins 重建</div>
-            <div class="text-xs text-gray-500 mt-1">触发 Jenkins 构建</div>
+                  class="group p-3 md:p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-yellow-500/50 hover:bg-yellow-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-center">
+            <div class="text-2xl md:text-3xl mb-1 md:mb-2">🏗️</div>
+            <div class="text-xs md:text-base font-medium text-gray-200 group-hover:text-yellow-300">Jenkins</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1 hidden md:block">触发 Jenkins 构建</div>
           </button>
         </div>
 
         <!-- Batch Operations -->
-        <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 md:p-5">
           <h3 class="font-medium mb-3">批量操作</h3>
           <p class="text-xs text-gray-500 mb-3">对所有工作区执行操作</p>
           <div class="flex flex-wrap gap-2">
@@ -269,25 +275,25 @@
       </div>
 
       <!-- ==================== History ==================== -->
-      <div v-if="currentPage === 'history'" class="p-6 max-w-5xl mx-auto">
-        <div class="flex items-center justify-between mb-6">
-          <h2 class="text-xl font-bold">命令历史</h2>
-          <div class="flex items-center gap-3">
-            <span class="text-xs text-gray-500">{{ refreshCountdown }}s 后刷新</span>
-            <button @click="fetchCommands(true)" class="text-sm text-brand-500 hover:text-brand-400 flex items-center gap-1">
-              🔄 刷新
+      <div v-if="currentPage === 'history'" class="p-4 md:p-6 max-w-5xl mx-auto">
+        <div class="flex items-center justify-between mb-4 md:mb-6">
+          <h2 class="text-lg md:text-xl font-bold">命令历史</h2>
+          <div class="flex items-center gap-2 md:gap-3">
+            <span class="text-[10px] md:text-xs text-gray-500">{{ refreshCountdown }}s</span>
+            <button @click="fetchCommands(true)" class="text-xs md:text-sm text-brand-500 hover:text-brand-400 flex items-center gap-1">
+              🔄 <span class="hidden sm:inline">刷新</span>
             </button>
           </div>
         </div>
 
         <!-- Filter Tabs -->
-        <div class="flex items-center gap-1 mb-4 bg-gray-900 rounded-lg p-1 border border-gray-800">
+        <div class="flex items-center gap-0.5 md:gap-1 mb-3 md:mb-4 bg-gray-900 rounded-lg p-1 border border-gray-800 overflow-x-auto">
           <button v-for="f in filterTabs" :key="f.value"
                   @click="historyFilter = f.value"
-                  :class="['px-3 py-1.5 rounded-md text-xs font-medium transition-all',
+                  :class="['px-2 md:px-3 py-1.5 rounded-md text-[11px] md:text-xs font-medium transition-all whitespace-nowrap shrink-0',
                     historyFilter === f.value ? 'bg-brand-600 text-white' : 'text-gray-400 hover:text-gray-200']">
             {{ f.label }}
-            <span v-if="f.value && stats[f.value]" class="ml-1 opacity-70">{{ stats[f.value] }}</span>
+            <span v-if="f.value && stats[f.value]" class="ml-0.5 md:ml-1 opacity-70">{{ stats[f.value] }}</span>
           </button>
         </div>
 
@@ -328,32 +334,32 @@
             </div>
 
             <!-- Expanded Detail -->
-            <div v-if="expandedCmd === cmd.id" class="border-t border-gray-800 p-4 bg-gray-800/20">
+            <div v-if="expandedCmd === cmd.id" class="border-t border-gray-800 p-3 md:p-4 bg-gray-800/20">
               <div class="space-y-3 text-xs">
-                <div class="grid grid-cols-2 gap-3">
-                  <div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3">
+                  <div class="break-all">
                     <span class="text-gray-500">命令 ID:</span>
-                    <span class="ml-2 text-gray-300 font-mono select-all">{{ cmd.id }}</span>
+                    <span class="ml-1 md:ml-2 text-gray-300 font-mono select-all">{{ cmd.id }}</span>
                   </div>
                   <div>
                     <span class="text-gray-500">状态:</span>
-                    <span :class="['ml-2', statusTextClass(cmd.status)]">{{ statusLabel(cmd.status) }}</span>
+                    <span :class="['ml-1 md:ml-2', statusTextClass(cmd.status)]">{{ statusLabel(cmd.status) }}</span>
                   </div>
                   <div>
                     <span class="text-gray-500">创建时间:</span>
-                    <span class="ml-2 text-gray-300">{{ formatTimeFull(cmd.created_at) }}</span>
+                    <span class="ml-1 md:ml-2 text-gray-300">{{ formatTimeFull(cmd.created_at) }}</span>
                   </div>
                   <div>
                     <span class="text-gray-500">更新时间:</span>
-                    <span class="ml-2 text-gray-300">{{ formatTimeFull(cmd.updated_at) }}</span>
+                    <span class="ml-1 md:ml-2 text-gray-300">{{ formatTimeFull(cmd.updated_at) }}</span>
                   </div>
-                  <div v-if="cmd.task_id">
+                  <div v-if="cmd.task_id" class="break-all">
                     <span class="text-gray-500">任务 ID:</span>
-                    <span class="ml-2 text-gray-300 font-mono">{{ cmd.task_id }}</span>
+                    <span class="ml-1 md:ml-2 text-gray-300 font-mono">{{ cmd.task_id }}</span>
                   </div>
-                  <div v-if="cmd.device_id">
+                  <div v-if="cmd.device_id" class="break-all">
                     <span class="text-gray-500">设备 ID:</span>
-                    <span class="ml-2 text-gray-300 font-mono">{{ cmd.device_id }}</span>
+                    <span class="ml-1 md:ml-2 text-gray-300 font-mono">{{ cmd.device_id }}</span>
                   </div>
                 </div>
                 <div v-if="cmd.params && Object.keys(cmd.params).length > 0">
@@ -385,9 +391,9 @@
       </div>
 
       <!-- ==================== Workspaces ==================== -->
-      <div v-if="currentPage === 'workspaces'" class="p-6 max-w-5xl mx-auto">
-        <div class="flex items-center justify-between mb-6">
-          <h2 class="text-xl font-bold">工作区管理</h2>
+      <div v-if="currentPage === 'workspaces'" class="p-4 md:p-6 max-w-5xl mx-auto">
+        <div class="flex items-center justify-between mb-4 md:mb-6">
+          <h2 class="text-lg md:text-xl font-bold">工作区管理</h2>
           <div class="flex items-center gap-2">
             <button @click="fetchWorkspaces" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition-colors">
               🔄 同步
@@ -433,8 +439,8 @@
       </div>
 
       <!-- ==================== Settings ==================== -->
-      <div v-if="currentPage === 'settings'" class="p-6 max-w-2xl mx-auto">
-        <h2 class="text-xl font-bold mb-6">设置</h2>
+      <div v-if="currentPage === 'settings'" class="p-4 md:p-6 max-w-2xl mx-auto">
+        <h2 class="text-lg md:text-xl font-bold mb-4 md:mb-6">设置</h2>
 
         <div class="space-y-6">
           <!-- API Connection -->
@@ -552,11 +558,26 @@
         </div>
       </div>
     </main>
+
+    <!-- Mobile Bottom Navigation -->
+    <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 z-30 safe-bottom">
+      <div class="flex items-stretch justify-around">
+        <button v-for="item in navItems" :key="item.id"
+                @click="currentPage = item.id"
+                :class="['flex-1 flex flex-col items-center gap-0.5 py-2 pt-2.5 text-xs transition-all relative',
+                  currentPage === item.id ? 'text-brand-500' : 'text-gray-500']">
+          <span class="text-lg leading-none">{{ item.icon }}</span>
+          <span class="leading-tight">{{ item.label }}</span>
+          <span v-if="item.id === 'history' && pendingCount > 0"
+                class="absolute top-1 right-1/4 w-4 h-4 bg-yellow-500 text-gray-950 text-[10px] font-bold rounded-full flex items-center justify-center">{{ pendingCount > 9 ? '9+' : pendingCount }}</span>
+        </button>
+      </div>
+    </nav>
   </div>
 
   <!-- Build Dialog -->
-  <div v-if="showBuildDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4" @click.self="showBuildDialog = false">
-    <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md p-6">
+  <div v-if="showBuildDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="showBuildDialog = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 md:p-6 max-h-[85vh] overflow-y-auto">
       <h3 class="text-lg font-bold mb-4">编译构建</h3>
       <div class="mb-4">
         <label class="text-sm text-gray-400 mb-1 block">构建脚本</label>
@@ -584,8 +605,8 @@
   </div>
 
   <!-- Cherry-Pick Dialog -->
-  <div v-if="showCherryDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4" @click.self="showCherryDialog = false">
-    <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md p-6">
+  <div v-if="showCherryDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="showCherryDialog = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 md:p-6 max-h-[85vh] overflow-y-auto">
       <h3 class="text-lg font-bold mb-4">Gerrit Cherry-Pick</h3>
       <div class="mb-4">
         <label class="text-sm text-gray-400 mb-1 block">Gerrit Change IDs</label>
@@ -603,8 +624,8 @@
   </div>
 
   <!-- Custom Command Dialog -->
-  <div v-if="showCustomDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4" @click.self="showCustomDialog = false">
-    <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg p-6">
+  <div v-if="showCustomDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="showCustomDialog = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-lg p-5 md:p-6 max-h-[85vh] overflow-y-auto">
       <h3 class="text-lg font-bold mb-4">自定义命令</h3>
       <div class="mb-4">
         <label class="text-sm text-gray-400 mb-1 block">Shell 命令</label>
@@ -632,8 +653,8 @@
   </div>
 
   <!-- Jenkins Dialog -->
-  <div v-if="showJenkinsDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4" @click.self="showJenkinsDialog = false">
-    <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md p-6">
+  <div v-if="showJenkinsDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="showJenkinsDialog = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 md:p-6 max-h-[85vh] overflow-y-auto">
       <h3 class="text-lg font-bold mb-4">Jenkins 重建</h3>
       <div class="mb-4">
         <label class="text-sm text-gray-400 mb-1 block">Jenkins 构建 URL 或 ID</label>
@@ -650,8 +671,8 @@
   </div>
 
   <!-- Add Workspace Dialog -->
-  <div v-if="showAddWorkspace" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4" @click.self="showAddWorkspace = false">
-    <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md p-6">
+  <div v-if="showAddWorkspace" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="showAddWorkspace = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 md:p-6 max-h-[85vh] overflow-y-auto">
       <h3 class="text-lg font-bold mb-4">添加工作区</h3>
       <div class="space-y-3">
         <div>
@@ -685,8 +706,8 @@
   </div>
 
   <!-- Confirm Dialog -->
-  <div v-if="confirmDialog.show" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" @click.self="confirmDialog.show = false">
-    <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-sm p-6">
+  <div v-if="confirmDialog.show" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end md:items-center justify-center md:p-4" @click.self="confirmDialog.show = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-sm p-5 md:p-6">
       <h3 class="text-lg font-bold mb-3">{{ confirmDialog.title }}</h3>
       <p class="text-sm text-gray-400 mb-5">{{ confirmDialog.message }}</p>
       <div class="flex gap-3 justify-end">
