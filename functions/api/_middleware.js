@@ -14,14 +14,21 @@ export async function onRequest(context) {
   }
 
   // API Key auth
+  // Sec-Fetch-Site is a browser-only forbidden header that cannot be set by JS,
+  // so "same-origin" reliably identifies requests from the web console itself.
   const apiKey = env.API_KEY;
   if (apiKey) {
-    const provided = request.headers.get('X-API-Key');
-    if (provided !== apiKey) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    const secFetchSite = request.headers.get('Sec-Fetch-Site');
+    const isBrowserSameOrigin = secFetchSite === 'same-origin';
+
+    if (!isBrowserSameOrigin) {
+      const provided = request.headers.get('X-API-Key');
+      if (provided !== apiKey) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
     }
   }
 
