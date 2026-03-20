@@ -1,0 +1,13 @@
+{
+  "name": "my-device-control-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "设备管理中心 - Web 远程控制面板",
+  "scripts": {
+    "dev": "npx wrangler pages dev . --kv COMMANDS --kv SYNC_DATA --port 8788",
+    "deploy": "npx wrangler pages deploy . --project-name my-device-control-web"
+  },
+  "devDependencies": {
+    "wrangler": "^3"
+  }
+}

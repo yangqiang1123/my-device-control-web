@@ -1,0 +1,10 @@
+name = "my-device-control-web"
+compatibility_date = "2024-12-01"
+
+[[kv_namespaces]]
+binding = "COMMANDS"
+id = "placeholder-commands-kv-id"
+
+[[kv_namespaces]]
+binding = "SYNC_DATA"
+id = "placeholder-sync-data-kv-id"
