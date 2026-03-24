@@ -1,0 +1,1795 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>设备管理中心 - Web 控制台</title>
+  <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.2.47/dist/vue.global.prod.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖥️</text></svg>" />
+  <style>
+    [v-cloak] { display: none; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+    .fade-enter-from, .fade-leave-to { opacity: 0; }
+    .toast-enter-active { animation: toast-in 0.3s ease; }
+    .toast-leave-active { animation: toast-out 0.3s ease; }
+    @keyframes toast-in { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    @keyframes toast-out { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
+    .spinner { border: 2px solid rgba(255,255,255,0.3); border-top: 2px solid #fff; border-radius: 50%; width: 16px; height: 16px; animation: spin 0.8s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    .cmd-detail-enter-active, .cmd-detail-leave-active { transition: all 0.2s ease; overflow: hidden; }
+    .cmd-detail-enter-from, .cmd-detail-leave-to { max-height: 0; opacity: 0; }
+    .cmd-detail-enter-to, .cmd-detail-leave-from { max-height: 500px; opacity: 1; }
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+    .term-page-height { height: calc(100vh - 4rem - 4rem - env(safe-area-inset-bottom, 0px)); }
+    @media (min-width: 768px) {
+      .term-page-height { height: calc(100vh - 4rem); }
+    }
+    @media (max-width: 767px) {
+      .mobile-toast { top: 0.5rem; right: 0.5rem; left: 0.5rem; }
+      .mobile-toast > div { max-width: 100%; }
+    }
+  </style>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#eff6ff', 100: '#dbeafe', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+<div id="app" v-cloak>
+  <!-- Toast -->
+  <div class="fixed top-2 right-2 left-2 md:left-auto md:top-4 md:right-4 z-50 space-y-2">
+    <transition-group name="toast">
+      <div v-for="toast in toasts" :key="toast.id"
+           :class="['px-3 md:px-4 py-2.5 md:py-3 rounded-lg shadow-lg text-xs md:text-sm md:max-w-sm flex items-center gap-2',
+             toast.type === 'success' ? 'bg-emerald-600' : toast.type === 'error' ? 'bg-red-600' : 'bg-blue-600']">
+        <span>{{ toast.type === 'success' ? '✓' : toast.type === 'error' ? '✗' : 'ℹ' }}</span>
+        <span class="truncate">{{ toast.message }}</span>
+      </div>
+    </transition-group>
+  </div>
+
+  <div class="flex h-screen">
+    <!-- Sidebar (desktop only) -->
+    <aside class="w-56 bg-gray-900 border-r border-gray-800 hidden md:flex flex-col shrink-0">
+      <div class="p-4 border-b border-gray-800">
+        <h1 class="text-lg font-bold text-white flex items-center gap-2">
+          <span class="text-2xl">🖥️</span> 控制台
+        </h1>
+        <p class="text-xs text-gray-500 mt-1">Web Remote Control</p>
+      </div>
+      <nav class="flex-1 p-2 space-y-1">
+        <button v-for="item in navItems" :key="item.id"
+                @click="currentPage = item.id"
+                :class="['w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all',
+                  currentPage === item.id ? 'bg-brand-600 text-white shadow-lg shadow-brand-600/20' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200']">
+          <span class="text-lg">{{ item.icon }}</span>
+          <span>{{ item.label }}</span>
+          <span v-if="item.id === 'history' && pendingCount > 0"
+                class="ml-auto px-1.5 py-0.5 text-xs bg-yellow-500/20 text-yellow-400 rounded-full">{{ pendingCount }}</span>
+        </button>
+      </nav>
+      <div class="p-3 border-t border-gray-800 space-y-2">
+        <div class="flex items-center gap-2 text-xs">
+          <span :class="['w-2 h-2 rounded-full', connected ? 'bg-emerald-400' : 'bg-red-400']"></span>
+          <span :class="connected ? 'text-emerald-400' : 'text-red-400'">API {{ connected ? '已连接' : '未连接' }}</span>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span :class="['w-2 h-2 rounded-full', desktopOnline ? 'bg-emerald-400 pulse-dot' : 'bg-gray-600']"></span>
+          <span :class="desktopOnline ? 'text-emerald-400' : 'text-gray-500'">
+            桌面应用 {{ desktopOnline ? '在线' : '离线' }}
+          </span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-y-auto pb-16 md:pb-0">
+
+      <!-- ==================== Dashboard ==================== -->
+      <div v-if="currentPage === 'dashboard'" class="p-4 md:p-6 max-w-5xl mx-auto">
+        <h2 class="text-lg md:text-xl font-bold mb-4 md:mb-6">仪表板</h2>
+
+        <!-- Connection Status -->
+        <div :class="['rounded-xl p-4 md:p-5 mb-4 md:mb-6 border', desktopOnline ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-gray-900 border-gray-800']">
+          <div class="flex items-start md:items-center justify-between gap-2">
+            <div class="flex items-start md:items-center gap-3 min-w-0">
+              <div :class="['w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center text-base md:text-xl shrink-0',
+                desktopOnline ? 'bg-emerald-500/20' : 'bg-gray-800']">
+                {{ desktopOnline ? '🟢' : '🔴' }}
+              </div>
+              <div class="min-w-0">
+                <div class="font-medium text-sm md:text-base">{{ desktopOnline ? '桌面应用在线' : '桌面应用离线' }}</div>
+                <div class="text-xs text-gray-500 mt-0.5 break-words">
+                  <template v-if="heartbeatData">
+                    最后心跳: {{ formatTime(heartbeatData.timestamp) }}
+                    <br class="md:hidden" />
+                    <span v-if="heartbeatData.devices_count !== undefined">{{ heartbeatData.devices_count }} 台设备</span>
+                    <span v-if="heartbeatData.workspaces_count !== undefined"> · {{ heartbeatData.workspaces_count }} 个工作区</span>
+                    <span v-if="heartbeatData.active_tasks !== undefined"> · {{ heartbeatData.active_tasks }} 个活跃任务</span>
+                  </template>
+                  <template v-else>尚未收到心跳信号，请确认桌面应用已开启 Web 触发器</template>
+                </div>
+              </div>
+            </div>
+            <button @click="checkHeartbeat" class="text-xs text-brand-500 hover:text-brand-400 shrink-0">刷新</button>
+          </div>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="grid grid-cols-4 gap-2 md:gap-4 mb-4 md:mb-6">
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 text-center md:text-left">
+            <div class="text-xl md:text-2xl font-bold text-yellow-400">{{ stats.pending }}</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1">等待中</div>
+          </div>
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 text-center md:text-left">
+            <div class="text-xl md:text-2xl font-bold text-blue-400">{{ stats.running }}</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1">执行中</div>
+          </div>
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 text-center md:text-left">
+            <div class="text-xl md:text-2xl font-bold text-emerald-400">{{ stats.success }}</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1">成功</div>
+          </div>
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 text-center md:text-left">
+            <div class="text-xl md:text-2xl font-bold text-red-400">{{ stats.failed }}</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1">失败</div>
+          </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 md:p-5">
+          <div class="flex items-center justify-between mb-3 md:mb-4">
+            <h3 class="font-medium text-sm md:text-base">最近操作</h3>
+            <button @click="currentPage = 'history'" class="text-xs text-brand-500 hover:text-brand-400">查看全部</button>
+          </div>
+          <div v-if="recentCommands.length === 0" class="text-center py-6 md:py-8 text-gray-500 text-sm">暂无操作记录</div>
+          <div v-else class="space-y-1 md:space-y-2">
+            <div v-for="cmd in recentCommands" :key="cmd.id"
+                 class="flex items-center justify-between py-2 px-2 md:px-3 rounded-lg hover:bg-gray-800/50 transition-colors">
+              <div class="flex items-center gap-2 md:gap-3 min-w-0">
+                <span :class="statusDotClass(cmd.status)"></span>
+                <span class="text-xs md:text-sm font-medium truncate">{{ actionLabel(cmd.action) }}</span>
+                <span v-if="cmd.workspace_name" class="text-xs text-gray-500 truncate hidden sm:inline">[{{ cmd.workspace_no }}] {{ cmd.workspace_name }}</span>
+              </div>
+              <span class="text-xs text-gray-500 shrink-0 ml-2">{{ formatTimeShort(cmd.created_at) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="mt-4 md:mt-6">
+          <h3 class="font-medium text-sm md:text-base mb-3">快捷入口</h3>
+          <div class="grid grid-cols-3 gap-2 md:gap-3">
+            <button @click="currentPage = 'ops'" class="p-3 md:p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-brand-500/50 transition-all text-center md:text-left">
+              <div class="text-xl md:text-2xl mb-1">🎮</div>
+              <div class="text-xs md:text-sm font-medium">发送命令</div>
+            </button>
+            <button @click="currentPage = 'workspaces'" class="p-3 md:p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-brand-500/50 transition-all text-center md:text-left">
+              <div class="text-xl md:text-2xl mb-1">📦</div>
+              <div class="text-xs md:text-sm font-medium">工作区</div>
+            </button>
+            <button @click="currentPage = 'settings'" class="p-3 md:p-4 bg-gray-900 border border-gray-800 rounded-xl hover:border-brand-500/50 transition-all text-center md:text-left">
+              <div class="text-xl md:text-2xl mb-1">⚙️</div>
+              <div class="text-xs md:text-sm font-medium">设置</div>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== Operations ==================== -->
+      <div v-if="currentPage === 'ops'" class="p-4 md:p-6 max-w-5xl mx-auto">
+        <h2 class="text-lg md:text-xl font-bold mb-4 md:mb-6">快捷操作</h2>
+
+        <!-- Workspace Selector -->
+        <div class="mb-4 md:mb-6 bg-gray-900 rounded-xl p-3 md:p-4 border border-gray-800">
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-sm text-gray-400">选择工作区</label>
+            <button v-if="workspaces.length > 0" @click="selectedWorkspace = null" class="text-xs text-gray-500 hover:text-gray-300">清除选择</button>
+          </div>
+          <div v-if="workspaces.length === 0" class="text-gray-500 text-sm py-2">
+            暂无工作区，请先在「工作区」页面添加或等待桌面应用同步
+          </div>
+          <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            <button v-for="ws in workspaces" :key="ws.id"
+                    @click="selectedWorkspace = ws"
+                    :class="['p-3 rounded-lg border text-left transition-all text-sm',
+                      selectedWorkspace?.id === ws.id
+                        ? 'border-brand-500 bg-brand-600/10 text-brand-100'
+                        : 'border-gray-700 bg-gray-800/50 text-gray-300 hover:border-gray-600']">
+              <div class="font-medium">[{{ ws.no }}] {{ ws.name }}</div>
+              <div class="text-xs text-gray-500 mt-1 truncate">{{ ws.device_name || ws.device_id || '-' }}</div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="grid grid-cols-3 gap-2 md:gap-4 mb-4 md:mb-6">
+          <button @click="executeAction('sync')" :disabled="!selectedWorkspace || sending"
+                  class="group p-3 md:p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-center">
+            <div class="text-2xl md:text-3xl mb-1 md:mb-2">🔄</div>
+            <div class="text-xs md:text-base font-medium text-gray-200 group-hover:text-emerald-300">同步</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1 hidden md:block">同步选中工作区代码</div>
+          </button>
+
+          <button @click="executeAction('force-sync')" :disabled="!selectedWorkspace || sending"
+                  class="group p-3 md:p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-orange-500/50 hover:bg-orange-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-center">
+            <div class="text-2xl md:text-3xl mb-1 md:mb-2">⚡</div>
+            <div class="text-xs md:text-base font-medium text-gray-200 group-hover:text-orange-300">强制同步</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1 hidden md:block">强制 repo sync</div>
+          </button>
+
+          <button @click="showBuildDialog = true" :disabled="!selectedWorkspace || sending"
+                  class="group p-3 md:p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-blue-500/50 hover:bg-blue-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-center">
+            <div class="text-2xl md:text-3xl mb-1 md:mb-2">🔨</div>
+            <div class="text-xs md:text-base font-medium text-gray-200 group-hover:text-blue-300">构建</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1 hidden md:block">执行构建脚本</div>
+          </button>
+
+          <button @click="showCherryDialog = true" :disabled="!selectedWorkspace || sending"
+                  class="group p-3 md:p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-purple-500/50 hover:bg-purple-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-center">
+            <div class="text-2xl md:text-3xl mb-1 md:mb-2">🍒</div>
+            <div class="text-xs md:text-base font-medium text-gray-200 group-hover:text-purple-300">Cherry-Pick</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1 hidden md:block">Gerrit 变更拣选</div>
+          </button>
+
+          <button @click="showCustomDialog = true" :disabled="!selectedWorkspace || sending"
+                  class="group p-3 md:p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-cyan-500/50 hover:bg-cyan-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-center">
+            <div class="text-2xl md:text-3xl mb-1 md:mb-2">⌨️</div>
+            <div class="text-xs md:text-base font-medium text-gray-200 group-hover:text-cyan-300">自定义</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1 hidden md:block">执行任意 shell 命令</div>
+          </button>
+
+          <button @click="showJenkinsDialog = true" :disabled="sending"
+                  class="group p-3 md:p-5 bg-gray-900 border border-gray-800 rounded-xl hover:border-yellow-500/50 hover:bg-yellow-500/5 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-center">
+            <div class="text-2xl md:text-3xl mb-1 md:mb-2">🏗️</div>
+            <div class="text-xs md:text-base font-medium text-gray-200 group-hover:text-yellow-300">Jenkins</div>
+            <div class="text-[10px] md:text-xs text-gray-500 mt-0.5 md:mt-1 hidden md:block">触发 Jenkins 构建</div>
+          </button>
+        </div>
+
+        <!-- Batch Operations -->
+        <div class="bg-gray-900 border border-gray-800 rounded-xl p-4 md:p-5">
+          <h3 class="font-medium mb-3">批量操作</h3>
+          <p class="text-xs text-gray-500 mb-3">对所有工作区执行操作</p>
+          <div class="flex flex-wrap gap-2">
+            <button @click="batchAction('sync')" :disabled="workspaces.length === 0 || sending"
+                    class="px-4 py-2 bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 rounded-lg text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              全部同步
+            </button>
+            <button @click="batchAction('force-sync')" :disabled="workspaces.length === 0 || sending"
+                    class="px-4 py-2 bg-orange-600/20 text-orange-400 hover:bg-orange-600/30 rounded-lg text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+              全部强制同步
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== History ==================== -->
+      <div v-if="currentPage === 'history'" class="p-4 md:p-6 max-w-5xl mx-auto">
+        <div class="flex items-center justify-between mb-4 md:mb-6">
+          <h2 class="text-lg md:text-xl font-bold">命令历史</h2>
+          <div class="flex items-center gap-2 md:gap-3">
+            <span class="text-[10px] md:text-xs text-gray-500">{{ refreshCountdown }}s</span>
+            <button @click="fetchCommands(true)" class="text-xs md:text-sm text-brand-500 hover:text-brand-400 flex items-center gap-1">
+              🔄 <span class="hidden sm:inline">刷新</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Filter Tabs -->
+        <div class="flex items-center gap-0.5 md:gap-1 mb-3 md:mb-4 bg-gray-900 rounded-lg p-1 border border-gray-800 overflow-x-auto">
+          <button v-for="f in filterTabs" :key="f.value"
+                  @click="historyFilter = f.value"
+                  :class="['px-2 md:px-3 py-1.5 rounded-md text-[11px] md:text-xs font-medium transition-all whitespace-nowrap shrink-0',
+                    historyFilter === f.value ? 'bg-brand-600 text-white' : 'text-gray-400 hover:text-gray-200']">
+            {{ f.label }}
+            <span v-if="f.value && stats[f.value]" class="ml-0.5 md:ml-1 opacity-70">{{ stats[f.value] }}</span>
+          </button>
+        </div>
+
+        <!-- Search -->
+        <div class="mb-4">
+          <input v-model="historySearch" type="text" placeholder="搜索命令..."
+                 class="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500" />
+        </div>
+
+        <div v-if="filteredCommands.length === 0" class="text-center py-16 text-gray-500">
+          <div class="text-4xl mb-3">📭</div>
+          <div>{{ historyFilter || historySearch ? '没有匹配的命令' : '暂无命令记录' }}</div>
+        </div>
+
+        <div v-else class="space-y-3">
+          <div v-for="cmd in filteredCommands" :key="cmd.id"
+               class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden transition-all"
+               :class="expandedCmd === cmd.id ? 'border-gray-700' : ''">
+            <!-- Command Header -->
+            <div class="p-4 cursor-pointer hover:bg-gray-800/30 transition-colors" @click="toggleExpand(cmd.id)">
+              <div class="flex items-center justify-between mb-2">
+                <div class="flex items-center gap-2">
+                  <span :class="statusBadgeClass(cmd.status)">{{ statusLabel(cmd.status) }}</span>
+                  <span class="text-sm font-medium text-gray-300">{{ actionLabel(cmd.action) }}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-gray-500">{{ formatTime(cmd.created_at) }}</span>
+                  <span :class="['text-gray-500 text-xs transition-transform', expandedCmd === cmd.id ? 'rotate-180' : '']">▼</span>
+                </div>
+              </div>
+              <div class="text-xs text-gray-500 space-x-3">
+                <span v-if="cmd.workspace_no">[{{ cmd.workspace_no }}] {{ cmd.workspace_name }}</span>
+                <span v-if="cmd.params?.script" class="truncate">脚本: {{ cmd.params.script }}</span>
+                <span v-if="cmd.params?.gerrit_ids">IDs: {{ cmd.params.gerrit_ids }}</span>
+                <span v-if="cmd.params?.command" class="truncate">命令: {{ cmd.params.command }}</span>
+                <span v-if="cmd.params?.jenkins_ref">Jenkins: {{ cmd.params.jenkins_ref }}</span>
+              </div>
+            </div>
+
+            <!-- Expanded Detail -->
+            <div v-if="expandedCmd === cmd.id" class="border-t border-gray-800 p-3 md:p-4 bg-gray-800/20">
+              <div class="space-y-3 text-xs">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 md:gap-3">
+                  <div class="break-all">
+                    <span class="text-gray-500">命令 ID:</span>
+                    <span class="ml-1 md:ml-2 text-gray-300 font-mono select-all">{{ cmd.id }}</span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500">状态:</span>
+                    <span :class="['ml-1 md:ml-2', statusTextClass(cmd.status)]">{{ statusLabel(cmd.status) }}</span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500">创建时间:</span>
+                    <span class="ml-1 md:ml-2 text-gray-300">{{ formatTimeFull(cmd.created_at) }}</span>
+                  </div>
+                  <div>
+                    <span class="text-gray-500">更新时间:</span>
+                    <span class="ml-1 md:ml-2 text-gray-300">{{ formatTimeFull(cmd.updated_at) }}</span>
+                  </div>
+                  <div v-if="cmd.task_id" class="break-all">
+                    <span class="text-gray-500">任务 ID:</span>
+                    <span class="ml-1 md:ml-2 text-gray-300 font-mono">{{ cmd.task_id }}</span>
+                  </div>
+                  <div v-if="cmd.device_id" class="break-all">
+                    <span class="text-gray-500">设备 ID:</span>
+                    <span class="ml-1 md:ml-2 text-gray-300 font-mono">{{ cmd.device_id }}</span>
+                  </div>
+                </div>
+                <div v-if="cmd.params && Object.keys(cmd.params).length > 0">
+                  <span class="text-gray-500">参数:</span>
+                  <pre class="mt-1 p-2 bg-gray-900 rounded text-gray-400 overflow-x-auto">{{ JSON.stringify(cmd.params, null, 2) }}</pre>
+                </div>
+                <div v-if="cmd.result">
+                  <span class="text-gray-500">执行结果:</span>
+                  <pre class="mt-1 p-3 bg-gray-900 rounded text-gray-300 whitespace-pre-wrap break-words max-h-64 overflow-y-auto">{{ cmd.result }}</pre>
+                </div>
+                <div class="flex gap-2 pt-2">
+                  <button v-if="cmd.status === 'pending'" @click.stop="cancelCommand(cmd)"
+                          class="px-3 py-1.5 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg text-xs transition-colors">
+                    取消命令
+                  </button>
+                  <button @click.stop="retryCommand(cmd)"
+                          class="px-3 py-1.5 bg-brand-600/20 text-brand-400 hover:bg-brand-600/30 rounded-lg text-xs transition-colors">
+                    重新执行
+                  </button>
+                  <button @click.stop="refreshSingleCommand(cmd.id)"
+                          class="px-3 py-1.5 bg-gray-700/50 text-gray-400 hover:bg-gray-700 rounded-lg text-xs transition-colors">
+                    刷新状态
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== Workspaces ==================== -->
+      <div v-if="currentPage === 'workspaces'" class="p-4 md:p-6 max-w-5xl mx-auto">
+        <div class="flex items-center justify-between mb-4 md:mb-6">
+          <h2 class="text-lg md:text-xl font-bold">工作区管理</h2>
+          <div class="flex items-center gap-2">
+            <button @click="fetchWorkspaces" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition-colors">
+              🔄 同步
+            </button>
+            <button @click="showAddWorkspace = true" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm font-medium transition-colors">
+              + 添加
+            </button>
+          </div>
+        </div>
+
+        <!-- Sync Info -->
+        <div v-if="workspaceSyncInfo" class="mb-4 p-3 bg-gray-900 border border-gray-800 rounded-lg text-xs text-gray-500">
+          工作区数据来源: {{ workspaceSyncInfo }}
+        </div>
+
+        <div v-if="workspaces.length === 0" class="text-center py-16 text-gray-500">
+          <div class="text-4xl mb-3">📦</div>
+          <div>暂无工作区</div>
+          <div class="text-sm mt-2">可手动添加，或等待桌面应用同步</div>
+        </div>
+
+        <div v-else class="space-y-3">
+          <div v-for="ws in workspaces" :key="ws.id"
+               class="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <div class="flex items-center justify-between">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <span class="font-medium">[{{ ws.no }}] {{ ws.name }}</span>
+                  <span v-if="selectedWorkspace?.id === ws.id" class="px-1.5 py-0.5 text-xs bg-brand-500/20 text-brand-400 rounded">当前选中</span>
+                </div>
+                <div class="text-xs text-gray-500 mt-1 space-x-3">
+                  <span>设备: {{ ws.device_name || ws.device_id || '-' }}</span>
+                  <span v-if="ws.path">路径: {{ ws.path }}</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0 ml-4">
+                <button @click="selectAndOperate(ws)" class="text-xs text-brand-500 hover:text-brand-400">操作</button>
+                <button @click="deleteWorkspace(ws.id)" class="text-xs text-gray-500 hover:text-red-400">删除</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== Settings ==================== -->
+      <div v-if="currentPage === 'settings'" class="p-4 md:p-6 max-w-2xl mx-auto">
+        <h2 class="text-lg md:text-xl font-bold mb-4 md:mb-6">设置</h2>
+
+        <div class="space-y-6">
+          <!-- API Connection -->
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h3 class="font-medium mb-4">API 连接</h3>
+            <div class="space-y-4">
+              <div>
+                <label class="text-sm text-gray-400 mb-1 block">API 地址</label>
+                <div class="flex items-center gap-2">
+                  <input v-model="settings.apiUrl"
+                         class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
+                         placeholder="https://my-device-control-web.pages.dev/api" />
+                  <button @click="copyToClipboard(settings.apiUrl || apiBaseUrl)" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors">
+                    复制
+                  </button>
+                </div>
+                <p class="text-xs text-gray-600 mt-1">Cloudflare Pages 后端 API 地址（桌面应用 Web 触发器同步数据的地址）</p>
+              </div>
+
+              <div>
+                <label class="text-sm text-gray-400 mb-1 block">API 密钥</label>
+                <p class="text-xs text-gray-500 mb-2">用于验证 Web 控制台与桌面应用之间的通信。两端需使用相同的密钥。</p>
+                <div class="flex gap-2">
+                  <div class="flex-1 relative">
+                    <input v-model="settings.apiKey" :type="showApiKey ? 'text' : 'password'"
+                           class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 pr-10"
+                           placeholder="输入 API 密钥" />
+                    <button @click="showApiKey = !showApiKey"
+                            class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-xs">
+                      {{ showApiKey ? '隐藏' : '显示' }}
+                    </button>
+                  </div>
+                  <button @click="generateApiKey" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition-colors">
+                    生成
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <button @click="testConnection"
+                        :class="['px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                          connectionTestResult === 'success' ? 'bg-emerald-600 text-white' :
+                          connectionTestResult === 'fail' ? 'bg-red-600 text-white' :
+                          'bg-brand-600 hover:bg-brand-700 text-white']">
+                  {{ connectionTestResult === 'success' ? '✓ 连接正常' : connectionTestResult === 'fail' ? '✗ 连接失败' : '测试连接' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Refresh Settings -->
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h3 class="font-medium mb-4">自动刷新</h3>
+            <div class="space-y-4">
+              <div>
+                <label class="text-sm text-gray-400 mb-1 block">页面自动刷新间隔（秒）</label>
+                <input v-model.number="settings.refreshInterval" type="number" min="5" max="120"
+                       class="w-32 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500" />
+                <p class="text-xs text-gray-600 mt-1">命令历史页面的自动刷新间隔</p>
+              </div>
+              <div>
+                <label class="text-sm text-gray-400 mb-1 block">桌面应用轮询间隔（秒）</label>
+                <input v-model.number="settings.pollInterval" type="number" min="3" max="60"
+                       class="w-32 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500" />
+                <p class="text-xs text-gray-600 mt-1">仅供参考，实际值需在桌面应用中配置</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Data Management -->
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h3 class="font-medium mb-4">数据管理</h3>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="text-sm">清除命令历史</div>
+                  <div class="text-xs text-gray-500">删除 KV 中的所有命令记录</div>
+                </div>
+                <button @click="clearCommandHistory"
+                        class="px-4 py-2 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg text-sm transition-colors">
+                  清除
+                </button>
+              </div>
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="text-sm">清除本地缓存</div>
+                  <div class="text-xs text-gray-500">清除浏览器中的设置和工作区缓存</div>
+                </div>
+                <button @click="clearLocalStorage"
+                        class="px-4 py-2 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg text-sm transition-colors">
+                  清除
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <button @click="saveSettings"
+                  class="w-full py-3 bg-brand-600 hover:bg-brand-700 rounded-xl font-medium transition-colors">
+            保存设置
+          </button>
+
+          <!-- Setup Guide -->
+          <div class="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h3 class="font-medium mb-3">配置指南</h3>
+            <div class="text-xs text-gray-500 space-y-2">
+              <p>1. 确认「API 地址」指向 Cloudflare 后端（默认已填好）</p>
+              <p>2. 输入 API 密钥（与 Cloudflare Pages 环境变量 <code class="bg-gray-800 px-1 rounded">API_KEY</code> 一致）</p>
+              <p>3. 点击「保存设置」后测试连接</p>
+              <p>4. 桌面应用同步的工作区和设备会自动出现</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== Terminal (xterm.js) ==================== -->
+      <div v-if="currentPage === 'terminal'" class="p-4 md:p-6 max-w-5xl mx-auto flex flex-col term-page-height">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg md:text-xl font-bold">远程终端</h2>
+          <div class="flex items-center gap-2">
+            <select v-model="termDeviceId" class="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs md:text-sm focus:outline-none focus:border-brand-500 max-w-[200px]">
+              <option value="">选择设备</option>
+              <option v-for="d in uniqueDevices" :key="d.id" :value="d.id">{{ d.name || d.id }}</option>
+            </select>
+            <button @click="clearTerminal" class="px-2 py-1.5 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs text-gray-400 transition-colors">清屏</button>
+          </div>
+        </div>
+        <div class="flex-1 bg-[#030712] border border-gray-800 rounded-xl overflow-hidden min-h-0">
+          <div ref="xtermContainer" style="width:100%;height:100%;"></div>
+        </div>
+        <div class="flex items-center gap-2 mt-2">
+          <label class="text-xs text-gray-500 shrink-0">工作目录:</label>
+          <input v-model="termCwd" class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-brand-500 font-mono"
+                 placeholder="可选，例如 /home/user/project" />
+        </div>
+      </div>
+
+      <!-- ==================== File Browser ==================== -->
+      <div v-if="currentPage === 'files'" class="p-4 md:p-6 max-w-5xl mx-auto">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg md:text-xl font-bold">文件浏览</h2>
+          <select v-model="fbDeviceId" @change="fbNavigate('~')" class="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs md:text-sm focus:outline-none focus:border-brand-500 max-w-[200px]">
+            <option value="">选择设备</option>
+            <option v-for="d in uniqueDevices" :key="d.id" :value="d.id">{{ d.name || d.id }}</option>
+          </select>
+        </div>
+        <!-- Breadcrumb -->
+        <div class="flex items-center gap-1 mb-3 bg-gray-900 border border-gray-800 rounded-lg p-2 overflow-x-auto text-xs font-mono">
+          <button @click="fbNavigate('~')" class="text-brand-400 hover:text-brand-300 shrink-0">~</button>
+          <template v-for="(seg, i) in fbPathSegments" :key="i">
+            <span class="text-gray-600">/</span>
+            <button @click="fbNavigate(fbPathSegments.slice(0, i+1).join('/'))" class="text-brand-400 hover:text-brand-300 truncate max-w-[120px]">{{ seg }}</button>
+          </template>
+          <div class="flex-1"></div>
+          <button @click="fbRefresh" :disabled="fbLoading" class="text-gray-500 hover:text-gray-300 shrink-0">🔄</button>
+        </div>
+        <!-- Path Input -->
+        <div class="flex gap-2 mb-3">
+          <input v-model="fbPathInput" @keydown.enter="fbNavigate(fbPathInput)" class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-brand-500" placeholder="输入路径..." />
+          <button @click="fbNavigate(fbPathInput)" :disabled="fbLoading || !fbDeviceId" class="px-3 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm disabled:opacity-40">前往</button>
+        </div>
+        <!-- Loading / Empty -->
+        <div v-if="fbLoading" class="text-center py-16 text-gray-500"><span class="spinner"></span> 加载中...</div>
+        <div v-else-if="!fbDeviceId" class="text-center py-16 text-gray-500">请先选择设备</div>
+        <div v-else-if="fbFiles.length === 0 && fbCurrentPath" class="text-center py-16 text-gray-500">空目录</div>
+        <!-- File List -->
+        <div v-else class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <div class="grid grid-cols-[auto_1fr_auto_auto] gap-x-3 md:gap-x-6 text-xs px-3 py-2 border-b border-gray-800 text-gray-500 font-medium">
+            <div></div><div>名称</div><div class="text-right hidden sm:block">大小</div><div class="text-right hidden sm:block">修改时间</div>
+          </div>
+          <div v-for="f in fbFiles" :key="f.path"
+               @click="f.is_dir && fbNavigate(f.path)"
+               :class="['grid grid-cols-[auto_1fr_auto_auto] gap-x-3 md:gap-x-6 text-xs md:text-sm px-3 py-2 border-b border-gray-800/50 transition-colors',
+                 f.is_dir ? 'cursor-pointer hover:bg-gray-800/50' : '']">
+            <span>{{ f.is_dir ? '📁' : '📄' }}</span>
+            <span :class="f.is_dir ? 'text-brand-400' : 'text-gray-300'" class="truncate">{{ f.name }}</span>
+            <span class="text-gray-500 text-right hidden sm:block">{{ f.is_dir ? '-' : formatFileSize(f.size) }}</span>
+            <span class="text-gray-600 text-right hidden sm:block">{{ f.modified }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== CI Tools ==================== -->
+      <div v-if="currentPage === 'ci'" class="p-4 md:p-6 max-w-5xl mx-auto">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg md:text-xl font-bold">CI 工具</h2>
+        </div>
+        <!-- Tab Switch -->
+        <div class="flex gap-1 mb-4 bg-gray-900 rounded-lg p-1 border border-gray-800">
+          <button @click="ciTab = 'jenkins'" :class="['px-4 py-1.5 rounded-md text-xs font-medium transition-all', ciTab === 'jenkins' ? 'bg-brand-600 text-white' : 'text-gray-400']">Jenkins</button>
+          <button @click="ciTab = 'gerrit'" :class="['px-4 py-1.5 rounded-md text-xs font-medium transition-all', ciTab === 'gerrit' ? 'bg-brand-600 text-white' : 'text-gray-400']">Gerrit</button>
+        </div>
+
+        <!-- Jenkins Tab: Build URL → 查询/Rebuild -->
+        <div v-if="ciTab === 'jenkins'">
+          <div class="space-y-3 mb-4">
+            <div>
+              <label class="text-xs text-gray-400 mb-1 block">已开始 Build URL</label>
+              <input v-model="jenkinsBuildUrl" class="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-brand-500"
+                     placeholder="如：http://10.0.80.24:8080/job/VerifyBuild_for_IOT_6490/28452/" />
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2 mb-4">
+            <button @click="ciQueryBuild" :disabled="ciLoading || !jenkinsBuildUrl.trim()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm disabled:opacity-40">查询 Build</button>
+            <button @click="ciOpenRebuildDialog" :disabled="!jenkinsBuildUrl.trim()" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-sm font-medium disabled:opacity-40">Rebuild</button>
+            <button @click="window.open(jenkinsBuildUrl, '_blank')" :disabled="!jenkinsBuildUrl.trim()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm disabled:opacity-40">打开 Build 页面</button>
+          </div>
+          <div v-if="ciLoading" class="text-center py-6 text-gray-500"><span class="spinner"></span> 查询中...</div>
+          <div v-if="ciBuildDetail" class="bg-gray-900 border border-gray-800 rounded-xl p-4 text-sm space-y-2">
+            <div class="flex items-center gap-2 text-gray-400"><span class="w-16 shrink-0">编号</span><span class="text-gray-200">{{ ciBuildDetail.number ?? '-' }}</span></div>
+            <div class="flex items-center gap-2 text-gray-400"><span class="w-16 shrink-0">状态</span>
+              <span :class="ciBuildDetail.building ? 'text-yellow-400' : ciBuildDetail.result === 'SUCCESS' ? 'text-emerald-400' : ciBuildDetail.result === 'FAILURE' ? 'text-red-400' : 'text-gray-300'">
+                {{ ciBuildDetail.building ? '进行中' : (ciBuildDetail.result || '未知') }}
+              </span>
+            </div>
+            <div class="flex items-center gap-2 text-gray-400"><span class="w-16 shrink-0">URL</span><span class="text-gray-300 font-mono text-xs break-all">{{ ciBuildDetail.url }}</span></div>
+          </div>
+        </div>
+
+        <!-- Rebuild Dialog -->
+        <div v-if="rebuildDialog.show" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="rebuildDialog.show = false">
+          <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-lg p-5 md:p-6 max-h-[85vh] overflow-y-auto">
+            <h3 class="text-lg font-bold mb-4">Rebuild 参数</h3>
+            <div class="mb-3">
+              <label class="text-xs text-gray-400 mb-1 block">Build URL</label>
+              <input :value="rebuildDialog.buildUrl" readonly class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm font-mono text-gray-400" />
+            </div>
+            <label class="flex items-center gap-2 mb-3 cursor-pointer text-sm">
+              <input type="checkbox" v-model="rebuildDialog.overrideEnabled" class="accent-yellow-500" />
+              <span>本次 Rebuild 修改 GERRITID 参数</span>
+            </label>
+            <div v-if="rebuildDialog.overrideEnabled" class="space-y-3 mb-4 pl-2 border-l-2 border-yellow-600/40">
+              <div v-for="key in ['GERRITID_QSSI','GERRITID_VENDOR','GERRITID_LE','GERRITID_MDEP']" :key="key">
+                <label class="text-xs text-gray-400 mb-1 block">{{ key }}</label>
+                <input v-model="rebuildDialog.overrides[key]" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-yellow-500"
+                       :placeholder="'填写 ' + key.split('_').slice(1).join('_').toLowerCase() + ' 分支的 GerritID'" />
+              </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-4">
+              <button @click="rebuildDialog.show = false" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm">取消</button>
+              <button @click="ciRebuild" :disabled="ciLoading" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-sm font-medium disabled:opacity-40">
+                <span v-if="ciLoading" class="spinner mr-1"></span>确认 Rebuild
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gerrit Tab: structured search -->
+        <div v-if="ciTab === 'gerrit'">
+          <div class="space-y-3 mb-4">
+            <div class="flex flex-wrap items-center gap-3">
+              <div class="flex items-center gap-2">
+                <label class="text-xs text-gray-400 shrink-0 w-16">状态</label>
+                <select v-model="gerritStatus" class="bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-brand-500">
+                  <option value="open">Open</option>
+                  <option value="merged">Merged</option>
+                  <option value="abandoned">Abandoned</option>
+                </select>
+              </div>
+              <label class="flex items-center gap-1.5 text-sm cursor-pointer">
+                <input type="checkbox" v-model="gerritExcludeWip" class="accent-brand-500" />
+                <span class="text-gray-300">排除 WIP</span>
+              </label>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-gray-400 shrink-0 w-16">分支</label>
+              <input v-model="gerritBranch" list="gerrit-branch-list" class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-500" placeholder="全部分支" />
+              <datalist id="gerrit-branch-list"><option v-for="b in gerritBranches" :key="b" :value="b" /></datalist>
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-gray-400 shrink-0 w-16">Owner</label>
+              <input v-model="gerritOwner" class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-500" placeholder="如：yangqiang0502@thundersoft.com" />
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-gray-400 shrink-0 w-16">关键字</label>
+              <input v-model="gerritKeyword" @keydown.enter="ciSearchGerrit(1)" class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-500" placeholder="如：lt9611" />
+            </div>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-gray-400 shrink-0 w-16">每页</label>
+              <select v-model="gerritPageSize" class="bg-gray-900 border border-gray-800 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-brand-500">
+                <option :value="10">10</option>
+                <option :value="25">25</option>
+                <option :value="50">50</option>
+              </select>
+            </div>
+            <div class="flex items-center gap-3">
+              <button @click="ciSearchGerrit(1)" :disabled="ciLoading" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm disabled:opacity-40 shrink-0">
+                <span v-if="ciLoading" class="spinner mr-1"></span>查询提交
+              </button>
+              <span class="text-xs text-gray-500 font-mono truncate">{{ buildGerritQueryPreview }}</span>
+            </div>
+          </div>
+          <div v-if="ciGerritResults.length === 0 && ciGerritSearched && !ciLoading" class="text-center py-8 text-gray-500">未找到匹配的变更</div>
+          <div v-else class="space-y-2">
+            <div v-for="ch in ciGerritResults" :key="ch.number" class="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4">
+              <div class="flex items-center justify-between mb-1">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span :class="['px-1.5 py-0.5 text-[10px] rounded font-medium shrink-0', gerritStatusClass(ch.status)]">{{ ch.status }}</span>
+                  <span class="text-sm font-medium truncate">{{ ch.subject }}</span>
+                </div>
+                <a :href="ch.url" target="_blank" class="text-xs text-brand-400 hover:text-brand-300 shrink-0 ml-2">#{{ ch.number }}</a>
+              </div>
+              <div class="text-xs text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
+                <span>{{ ch.project }}</span>
+                <span>{{ ch.branch }}</span>
+                <span>{{ ch.owner }}</span>
+                <span>{{ ch.updated }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-if="ciGerritResults.length > 0" class="flex items-center justify-center gap-4 mt-4">
+            <button @click="ciSearchGerrit(gerritPage - 1)" :disabled="gerritPage <= 1" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm disabled:opacity-40">上一页</button>
+            <span class="text-sm text-gray-400">第 {{ gerritPage }} 页</span>
+            <button @click="ciSearchGerrit(gerritPage + 1)" :disabled="!gerritHasMore" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm disabled:opacity-40">下一页</button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Mobile Bottom Navigation -->
+    <nav class="md:hidden fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 z-30 safe-bottom">
+      <div class="flex items-stretch justify-around">
+        <button v-for="item in mobileNavItems" :key="item.id"
+                @click="currentPage = item.id"
+                :class="['flex-1 flex flex-col items-center gap-0.5 py-2 pt-2.5 text-xs transition-all relative',
+                  currentPage === item.id ? 'text-brand-500' : 'text-gray-500']">
+          <span class="text-lg leading-none">{{ item.icon }}</span>
+          <span class="text-[10px] leading-tight">{{ item.label }}</span>
+          <span v-if="item.id === 'history' && pendingCount > 0"
+                class="absolute top-1 right-1/4 w-4 h-4 bg-yellow-500 text-gray-950 text-[10px] font-bold rounded-full flex items-center justify-center">{{ pendingCount > 9 ? '9+' : pendingCount }}</span>
+        </button>
+      </div>
+    </nav>
+  </div>
+
+  <!-- Build Dialog -->
+  <div v-if="showBuildDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="showBuildDialog = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 md:p-6 max-h-[85vh] overflow-y-auto">
+      <h3 class="text-lg font-bold mb-4">编译构建</h3>
+      <div class="mb-4">
+        <label class="text-sm text-gray-400 mb-1 block">构建脚本</label>
+        <textarea v-model="buildScript" rows="3"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 resize-none"
+                  placeholder="例如: source build/envsetup.sh && lunch xxx && make -j8"></textarea>
+      </div>
+      <!-- Build Templates -->
+      <div class="mb-4">
+        <label class="text-sm text-gray-400 mb-2 block">常用模板</label>
+        <div class="flex flex-wrap gap-2">
+          <button v-for="t in buildTemplates" :key="t.name" @click="buildScript = t.script"
+                  class="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-400 hover:border-brand-500 hover:text-brand-400 transition-colors">
+            {{ t.name }}
+          </button>
+        </div>
+      </div>
+      <div class="flex gap-3 justify-end">
+        <button @click="showBuildDialog = false" class="px-4 py-2 text-sm text-gray-400 hover:text-gray-200">取消</button>
+        <button @click="submitBuild" :disabled="!buildScript.trim()" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm font-medium disabled:opacity-40">
+          执行
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cherry-Pick Dialog -->
+  <div v-if="showCherryDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="showCherryDialog = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 md:p-6 max-h-[85vh] overflow-y-auto">
+      <h3 class="text-lg font-bold mb-4">Gerrit Cherry-Pick</h3>
+      <div class="mb-4">
+        <label class="text-sm text-gray-400 mb-1 block">Gerrit Change IDs</label>
+        <textarea v-model="cherryIds" rows="3"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 resize-none"
+                  placeholder="输入 Gerrit Change ID，多个用空格或换行分隔&#10;例如: 123456 789012"></textarea>
+      </div>
+      <div class="flex gap-3 justify-end">
+        <button @click="showCherryDialog = false" class="px-4 py-2 text-sm text-gray-400 hover:text-gray-200">取消</button>
+        <button @click="submitCherry" :disabled="!cherryIds.trim()" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm font-medium disabled:opacity-40">
+          执行
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Command Dialog -->
+  <div v-if="showCustomDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="showCustomDialog = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-lg p-5 md:p-6 max-h-[85vh] overflow-y-auto">
+      <h3 class="text-lg font-bold mb-4">自定义命令</h3>
+      <div class="mb-4">
+        <label class="text-sm text-gray-400 mb-1 block">Shell 命令</label>
+        <textarea v-model="customCommand" rows="4"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 resize-none font-mono"
+                  placeholder="输入要执行的命令..."></textarea>
+      </div>
+      <!-- Quick Commands -->
+      <div class="mb-4">
+        <label class="text-sm text-gray-400 mb-2 block">快捷命令</label>
+        <div class="flex flex-wrap gap-2">
+          <button v-for="q in quickCommands" :key="q.name" @click="customCommand = q.cmd"
+                  class="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-400 hover:border-brand-500 hover:text-brand-400 transition-colors">
+            {{ q.name }}
+          </button>
+        </div>
+      </div>
+      <div class="flex gap-3 justify-end">
+        <button @click="showCustomDialog = false" class="px-4 py-2 text-sm text-gray-400 hover:text-gray-200">取消</button>
+        <button @click="submitCustom" :disabled="!customCommand.trim()" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm font-medium disabled:opacity-40">
+          执行
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Jenkins Dialog -->
+  <div v-if="showJenkinsDialog" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="showJenkinsDialog = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 md:p-6 max-h-[85vh] overflow-y-auto">
+      <h3 class="text-lg font-bold mb-4">Jenkins 重建</h3>
+      <div class="mb-4">
+        <label class="text-sm text-gray-400 mb-1 block">Jenkins 构建 URL 或 ID</label>
+        <input v-model="jenkinsRef" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
+               placeholder="例如: https://jenkins.example.com/job/xxx/123" />
+      </div>
+      <div class="flex gap-3 justify-end">
+        <button @click="showJenkinsDialog = false" class="px-4 py-2 text-sm text-gray-400 hover:text-gray-200">取消</button>
+        <button @click="submitJenkins" :disabled="!jenkinsRef.trim()" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm font-medium disabled:opacity-40">
+          执行
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Workspace Dialog -->
+  <div v-if="showAddWorkspace" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="showAddWorkspace = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 md:p-6 max-h-[85vh] overflow-y-auto">
+      <h3 class="text-lg font-bold mb-4">添加工作区</h3>
+      <div class="space-y-3">
+        <div>
+          <label class="text-sm text-gray-400 mb-1 block">编号 *</label>
+          <input v-model="newWorkspace.no" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500" placeholder="例如: 1" />
+        </div>
+        <div>
+          <label class="text-sm text-gray-400 mb-1 block">名称 *</label>
+          <input v-model="newWorkspace.name" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500" placeholder="例如: AOSP-main" />
+        </div>
+        <div>
+          <label class="text-sm text-gray-400 mb-1 block">设备 ID</label>
+          <input v-model="newWorkspace.device_id" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500" placeholder="对应桌面应用中的设备 ID" />
+        </div>
+        <div>
+          <label class="text-sm text-gray-400 mb-1 block">设备名称</label>
+          <input v-model="newWorkspace.device_name" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500" placeholder="便于识别" />
+        </div>
+        <div>
+          <label class="text-sm text-gray-400 mb-1 block">路径</label>
+          <input v-model="newWorkspace.path" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500" placeholder="远程工作区路径" />
+        </div>
+      </div>
+      <div class="flex gap-3 justify-end mt-5">
+        <button @click="showAddWorkspace = false" class="px-4 py-2 text-sm text-gray-400 hover:text-gray-200">取消</button>
+        <button @click="addWorkspace" :disabled="!newWorkspace.no || !newWorkspace.name" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm font-medium disabled:opacity-40">
+          添加
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm Dialog -->
+  <div v-if="confirmDialog.show" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end md:items-center justify-center md:p-4" @click.self="confirmDialog.show = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-sm p-5 md:p-6">
+      <h3 class="text-lg font-bold mb-3">{{ confirmDialog.title }}</h3>
+      <p class="text-sm text-gray-400 mb-5">{{ confirmDialog.message }}</p>
+      <div class="flex gap-3 justify-end">
+        <button @click="confirmDialog.show = false" class="px-4 py-2 text-sm text-gray-400 hover:text-gray-200">取消</button>
+        <button @click="confirmDialog.onConfirm(); confirmDialog.show = false"
+                class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm font-medium">
+          确认
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const { createApp, ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } = Vue
+
+createApp({
+  setup() {
+    const currentPage = ref('dashboard')
+    const connected = ref(false)
+    const desktopOnline = ref(false)
+    const heartbeatData = ref(null)
+    const sending = ref(false)
+    const toasts = ref([])
+    const commands = ref([])
+    const workspaces = ref([])
+    const selectedWorkspace = ref(null)
+    const expandedCmd = ref(null)
+    const historyFilter = ref('')
+    const historySearch = ref('')
+    const refreshCountdown = ref(10)
+    const showApiKey = ref(false)
+    const connectionTestResult = ref(null)
+    const workspaceSyncInfo = ref(null)
+
+    const showBuildDialog = ref(false)
+    const showCherryDialog = ref(false)
+    const showCustomDialog = ref(false)
+    const showJenkinsDialog = ref(false)
+    const showAddWorkspace = ref(false)
+
+    const buildScript = ref('')
+    const cherryIds = ref('')
+    const customCommand = ref('')
+    const jenkinsRef = ref('')
+
+    const newWorkspace = reactive({ no: '', name: '', device_id: '', device_name: '', path: '' })
+    const confirmDialog = reactive({ show: false, title: '', message: '', onConfirm: () => {} })
+
+    const settings = reactive({
+      apiUrl: localStorage.getItem('mdc_api_url') || 'https://my-device-control-web.pages.dev/api',
+      apiKey: localStorage.getItem('mdc_api_key') || '',
+      pollInterval: parseInt(localStorage.getItem('mdc_poll_interval') || '5'),
+      refreshInterval: parseInt(localStorage.getItem('mdc_refresh_interval') || '10')
+    })
+
+    // Terminal state (xterm.js)
+    const xtermContainer = ref(null)
+    const termDeviceId = ref('')
+    const termCwd = ref('')
+    const termLoading = ref(false)
+    let xtermInstance = null
+    let xtermFitAddon = null
+    let xtermCurrentLine = ''
+    let xtermCmdHistory = []
+    let xtermHistoryIdx = -1
+    let xtermReady = false
+
+    // File Browser state
+    const fbDeviceId = ref('')
+    const fbCurrentPath = ref('')
+    const fbPathInput = ref('~')
+    const fbFiles = ref([])
+    const fbLoading = ref(false)
+
+    // CI Tools state
+    const ciTab = ref('jenkins')
+    const ciLoading = ref(false)
+    // Jenkins Rebuild
+    const jenkinsBuildUrl = ref('')
+    const ciBuildDetail = ref(null)
+    const rebuildDialog = reactive({
+      show: false,
+      buildUrl: '',
+      overrideEnabled: false,
+      overrides: { GERRITID_QSSI: '', GERRITID_VENDOR: '', GERRITID_LE: '', GERRITID_MDEP: '' }
+    })
+    // Gerrit structured search
+    const gerritStatus = ref('open')
+    const gerritExcludeWip = ref(true)
+    const gerritBranch = ref('')
+    const gerritBranches = ref(JSON.parse(localStorage.getItem('gerrit_branches') || '[]'))
+    const gerritOwner = ref('')
+    const gerritKeyword = ref('')
+    const gerritPageSize = ref(25)
+    const gerritPage = ref(1)
+    const gerritHasMore = ref(false)
+    const ciGerritResults = ref([])
+    const ciGerritSearched = ref(false)
+
+    const navItems = [
+      { id: 'dashboard', icon: '📊', label: '仪表板' },
+      { id: 'ops', icon: '🎮', label: '快捷操作' },
+      { id: 'terminal', icon: '💻', label: '终端' },
+      { id: 'files', icon: '📂', label: '文件' },
+      { id: 'ci', icon: '🔧', label: 'CI' },
+      { id: 'history', icon: '📋', label: '历史' },
+      { id: 'workspaces', icon: '📦', label: '工作区' },
+      { id: 'settings', icon: '⚙️', label: '设置' }
+    ]
+
+    const filterTabs = [
+      { label: '全部', value: '' },
+      { label: '等待中', value: 'pending' },
+      { label: '执行中', value: 'running' },
+      { label: '成功', value: 'success' },
+      { label: '失败', value: 'failed' }
+    ]
+
+    const buildTemplates = [
+      { name: 'AOSP 完整编译', script: 'source build/envsetup.sh && lunch aosp_arm64-userdebug && make -j$(nproc)' },
+      { name: '内核编译', script: '__KERNEL_BUILD__:' },
+      { name: 'Make Clean', script: 'make clean' },
+      { name: 'Make Bootimage', script: 'source build/envsetup.sh && lunch aosp_arm64-userdebug && make bootimage -j$(nproc)' }
+    ]
+
+    const quickCommands = [
+      { name: 'Repo Status', cmd: 'repo status | head -100' },
+      { name: '磁盘空间', cmd: 'df -h' },
+      { name: '系统信息', cmd: 'uname -a && cat /etc/os-release' },
+      { name: '内存使用', cmd: 'free -h' },
+      { name: 'CPU 信息', cmd: 'lscpu | head -20' },
+      { name: 'Git Log', cmd: 'git log --oneline -20' },
+      { name: '进程列表', cmd: 'ps aux | head -30' }
+    ]
+
+    const mobileNavItems = computed(() => {
+      const mobileIds = ['ops', 'terminal', 'files', 'ci', 'history', 'settings']
+      return navItems.filter(n => mobileIds.includes(n.id))
+    })
+
+    const apiBaseUrl = computed(() => {
+      const url = settings.apiUrl || 'https://my-device-control-web.pages.dev/api'
+      return url.replace(/\/+$/, '')
+    })
+
+    const stats = computed(() => {
+      const s = { pending: 0, running: 0, success: 0, failed: 0 }
+      commands.value.forEach(c => {
+        if (s[c.status] !== undefined) s[c.status]++
+      })
+      return s
+    })
+
+    const pendingCount = computed(() => stats.value.pending + stats.value.running)
+
+    const recentCommands = computed(() => commands.value.slice(0, 5))
+
+    const filteredCommands = computed(() => {
+      let list = commands.value
+      if (historyFilter.value) {
+        list = list.filter(c => c.status === historyFilter.value)
+      }
+      if (historySearch.value.trim()) {
+        const q = historySearch.value.toLowerCase()
+        list = list.filter(c =>
+          (c.action || '').toLowerCase().includes(q) ||
+          (c.workspace_name || '').toLowerCase().includes(q) ||
+          (c.result || '').toLowerCase().includes(q) ||
+          (c.id || '').toLowerCase().includes(q) ||
+          JSON.stringify(c.params || {}).toLowerCase().includes(q)
+        )
+      }
+      return list
+    })
+
+    function toast(message, type = 'success') {
+      const id = Date.now() + Math.random()
+      toasts.value.push({ id, message, type })
+      setTimeout(() => { toasts.value = toasts.value.filter(t => t.id !== id) }, 3000)
+    }
+
+    function apiHeaders() {
+      return { 'Content-Type': 'application/json', 'X-API-Key': settings.apiKey }
+    }
+
+    async function apiCall(method, path, body) {
+      const base = apiBaseUrl.value
+      const opts = { method, headers: apiHeaders() }
+      if (body) opts.body = JSON.stringify(body)
+      const resp = await fetch(`${base}${path}`, opts)
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => resp.statusText)
+        throw new Error(text || `HTTP ${resp.status}`)
+      }
+      return resp.json()
+    }
+
+    async function checkConnection() {
+      try {
+        await apiCall('GET', '/commands?limit=1')
+        connected.value = true
+      } catch {
+        connected.value = false
+      }
+    }
+
+    async function checkHeartbeat() {
+      try {
+        const data = await apiCall('GET', '/heartbeat')
+        desktopOnline.value = data.online || false
+        heartbeatData.value = data.heartbeat
+      } catch {
+        desktopOnline.value = false
+        heartbeatData.value = null
+      }
+    }
+
+    let lastFetchFailed = false
+
+    async function fetchCommands(showError = false) {
+      try {
+        const data = await apiCall('GET', '/commands?limit=100')
+        commands.value = data.commands || []
+        if (lastFetchFailed) { lastFetchFailed = false; connected.value = true }
+      } catch (e) {
+        if (!lastFetchFailed && !showError) {
+          lastFetchFailed = true
+        }
+        if (showError) toast('获取命令历史失败: ' + e.message, 'error')
+      }
+    }
+
+    async function fetchWorkspaces() {
+      try {
+        const data = await apiCall('GET', '/workspaces')
+        if (data.workspaces?.length > 0) {
+          workspaces.value = data.workspaces
+          workspaceSyncInfo.value = '服务器 (共 ' + data.workspaces.length + ' 个)'
+          localStorage.setItem('mdc_workspaces', JSON.stringify(workspaces.value))
+          return
+        }
+      } catch {}
+      const local = JSON.parse(localStorage.getItem('mdc_workspaces') || '[]')
+      if (workspaces.value.length === 0 && local.length > 0) {
+        workspaces.value = local
+        workspaceSyncInfo.value = '本地缓存'
+      }
+    }
+
+    async function executeAction(action, params = {}) {
+      if (!selectedWorkspace.value && action !== 'jenkins-rebuild') {
+        toast('请先选择工作区', 'error')
+        return
+      }
+      sending.value = true
+      try {
+        const body = {
+          action,
+          workspace_id: selectedWorkspace.value?.id,
+          workspace_no: selectedWorkspace.value?.no,
+          workspace_name: selectedWorkspace.value?.name,
+          device_id: selectedWorkspace.value?.device_id,
+          params
+        }
+        await apiCall('POST', '/commands', body)
+        toast(`${actionLabel(action)} 命令已提交`)
+        await fetchCommands()
+      } catch (e) {
+        toast('提交失败: ' + e.message, 'error')
+      } finally {
+        sending.value = false
+      }
+    }
+
+    async function batchAction(action) {
+      if (workspaces.value.length === 0) return
+      const count = workspaces.value.length
+      confirmDialog.title = '批量操作确认'
+      confirmDialog.message = `确认对全部 ${count} 个工作区执行「${actionLabel(action)}」操作？`
+      confirmDialog.onConfirm = async () => {
+        sending.value = true
+        let ok = 0, fail = 0
+        for (const ws of workspaces.value) {
+          try {
+            await apiCall('POST', '/commands', {
+              action,
+              workspace_id: ws.id,
+              workspace_no: ws.no,
+              workspace_name: ws.name,
+              device_id: ws.device_id,
+              params: {}
+            })
+            ok++
+          } catch { fail++ }
+        }
+        sending.value = false
+        toast(`批量操作完成: ${ok} 成功, ${fail} 失败`, fail > 0 ? 'error' : 'success')
+        fetchCommands()
+      }
+      confirmDialog.show = true
+    }
+
+    function submitBuild() {
+      executeAction('build', { script: buildScript.value })
+      showBuildDialog.value = false
+      buildScript.value = ''
+    }
+
+    function submitCherry() {
+      executeAction('cherry', { gerrit_ids: cherryIds.value })
+      showCherryDialog.value = false
+      cherryIds.value = ''
+    }
+
+    function submitCustom() {
+      executeAction('custom', { command: customCommand.value })
+      showCustomDialog.value = false
+      customCommand.value = ''
+    }
+
+    function submitJenkins() {
+      executeAction('jenkins-rebuild', { jenkins_ref: jenkinsRef.value })
+      showJenkinsDialog.value = false
+      jenkinsRef.value = ''
+    }
+
+    async function addWorkspace() {
+      const ws = {
+        id: newWorkspace.no + '_' + Date.now(),
+        no: newWorkspace.no,
+        name: newWorkspace.name,
+        device_id: newWorkspace.device_id,
+        device_name: newWorkspace.device_name,
+        path: newWorkspace.path
+      }
+      workspaces.value.push(ws)
+      localStorage.setItem('mdc_workspaces', JSON.stringify(workspaces.value))
+      try { await apiCall('POST', '/workspaces', { workspace: ws }) } catch (e) {
+        toast('同步到服务器失败，仅保存到本地', 'error')
+      }
+      showAddWorkspace.value = false
+      Object.assign(newWorkspace, { no: '', name: '', device_id: '', device_name: '', path: '' })
+      toast('工作区已添加')
+    }
+
+    async function deleteWorkspace(id) {
+      confirmDialog.title = '删除工作区'
+      confirmDialog.message = '确认删除该工作区？'
+      confirmDialog.onConfirm = async () => {
+        workspaces.value = workspaces.value.filter(w => w.id !== id)
+        localStorage.setItem('mdc_workspaces', JSON.stringify(workspaces.value))
+        if (selectedWorkspace.value?.id === id) selectedWorkspace.value = null
+        try { await apiCall('DELETE', `/workspaces?id=${id}`) } catch {}
+        toast('工作区已删除')
+      }
+      confirmDialog.show = true
+    }
+
+    function selectAndOperate(ws) {
+      selectedWorkspace.value = ws
+      currentPage.value = 'ops'
+    }
+
+    async function cancelCommand(cmd) {
+      try {
+        await apiCall('PUT', `/commands/${cmd.id}`, { status: 'canceled', result: '用户手动取消' })
+        toast('命令已取消')
+        await fetchCommands()
+      } catch (e) {
+        toast('取消失败: ' + e.message, 'error')
+      }
+    }
+
+    async function retryCommand(cmd) {
+      const params = cmd.params || {}
+      if (cmd.workspace_no || cmd.workspace_id) {
+        const ws = workspaces.value.find(w => w.no === cmd.workspace_no || w.id === cmd.workspace_id)
+        if (ws) selectedWorkspace.value = ws
+      }
+      await executeAction(cmd.action, params)
+    }
+
+    async function refreshSingleCommand(id) {
+      try {
+        const data = await apiCall('GET', `/commands/${id}`)
+        if (data.command) {
+          const idx = commands.value.findIndex(c => c.id === id)
+          if (idx >= 0) commands.value[idx] = data.command
+        }
+        toast('状态已刷新')
+      } catch (e) {
+        toast('刷新失败: ' + e.message, 'error')
+      }
+    }
+
+    function toggleExpand(id) {
+      expandedCmd.value = expandedCmd.value === id ? null : id
+    }
+
+    function saveSettings() {
+      localStorage.setItem('mdc_api_url', settings.apiUrl)
+      localStorage.setItem('mdc_api_key', settings.apiKey)
+      localStorage.setItem('mdc_poll_interval', String(settings.pollInterval))
+      localStorage.setItem('mdc_refresh_interval', String(settings.refreshInterval))
+      toast('设置已保存')
+      checkConnection()
+      checkHeartbeat()
+    }
+
+    function generateApiKey() {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+      settings.apiKey = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+        .map(b => chars[b % chars.length]).join('')
+    }
+
+    async function testConnection() {
+      connectionTestResult.value = null
+      try {
+        await apiCall('GET', '/commands?limit=1')
+        connectionTestResult.value = 'success'
+      } catch {
+        connectionTestResult.value = 'fail'
+      }
+      setTimeout(() => { connectionTestResult.value = null }, 3000)
+    }
+
+    async function clearCommandHistory() {
+      confirmDialog.title = '清除命令历史'
+      confirmDialog.message = '确认删除所有命令记录？此操作不可恢复。'
+      confirmDialog.onConfirm = async () => {
+        try {
+          for (const cmd of commands.value) {
+            await apiCall('PUT', `/commands/${cmd.id}`, { status: 'canceled', result: '已清除' }).catch(() => {})
+          }
+          commands.value = []
+          toast('命令历史已清除')
+        } catch (e) {
+          toast('清除失败: ' + e.message, 'error')
+        }
+      }
+      confirmDialog.show = true
+    }
+
+    function clearLocalStorage() {
+      confirmDialog.title = '清除本地缓存'
+      confirmDialog.message = '确认清除浏览器中的所有本地数据？API 密钥也会被清除。'
+      confirmDialog.onConfirm = () => {
+        localStorage.removeItem('mdc_api_url')
+        localStorage.removeItem('mdc_api_key')
+        localStorage.removeItem('mdc_poll_interval')
+        localStorage.removeItem('mdc_refresh_interval')
+        localStorage.removeItem('mdc_workspaces')
+        settings.apiUrl = 'https://my-device-control-web.pages.dev/api'
+        settings.apiKey = ''
+        settings.pollInterval = 5
+        settings.refreshInterval = 10
+        toast('本地缓存已清除')
+      }
+      confirmDialog.show = true
+    }
+
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text).then(() => toast('已复制')).catch(() => toast('复制失败', 'error'))
+    }
+
+    // ===== Core: send command and wait for result =====
+    async function sendAndWaitCommand(action, params = {}, timeoutSec = 120) {
+      const resp = await apiCall('POST', '/commands', { action, params })
+      const cmdId = resp.command?.id
+      if (!cmdId) throw new Error('创建命令失败')
+      const startMs = Date.now()
+      const deadlineMs = startMs + timeoutSec * 1000
+      let pollMs = 800
+      while (Date.now() < deadlineMs) {
+        await new Promise(r => setTimeout(r, pollMs))
+        try {
+          const detail = await apiCall('GET', `/commands/${cmdId}`)
+          const c = detail.command
+          if (!c) continue
+          if (c.status === 'success') return c.result
+          if (c.status === 'failed') throw new Error(c.result || '命令执行失败')
+        } catch (e) {
+          if (e.message && !e.message.includes('HTTP')) throw e
+        }
+        if (Date.now() - startMs > 15000) pollMs = 1500
+      }
+      throw new Error('命令执行超时')
+    }
+
+    const uniqueDevices = computed(() => {
+      const seen = new Set()
+      return workspaces.value.filter(ws => {
+        if (!ws.device_id || seen.has(ws.device_id)) return false
+        seen.add(ws.device_id)
+        return true
+      }).map(ws => ({ id: ws.device_id, name: ws.device_name || ws.device_id }))
+    })
+
+    // ===== Terminal (xterm.js) =====
+    async function initXterm() {
+      if (xtermReady || !xtermContainer.value) return
+      try {
+        const [xtermMod, fitMod] = await Promise.all([
+          import('https://cdn.jsdelivr.net/npm/xterm@5.3.0/+esm'),
+          import('https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/+esm')
+        ])
+        xtermInstance = new xtermMod.Terminal({
+          cursorBlink: true,
+          theme: { background: '#030712', foreground: '#d1d5db', cursor: '#3b82f6', selectionBackground: 'rgba(59,130,246,0.3)' },
+          fontSize: 14, fontFamily: 'Menlo, Monaco, "Courier New", monospace', scrollback: 5000,
+        })
+        xtermFitAddon = new fitMod.FitAddon()
+        xtermInstance.loadAddon(xtermFitAddon)
+        xtermInstance.open(xtermContainer.value)
+        xtermFitAddon.fit()
+        xtermInstance.writeln('\x1b[1;34m══ 远程终端 ══\x1b[0m')
+        xtermInstance.writeln('\x1b[90m选择设备后输入命令，Enter 执行，↑↓ 切换历史，Ctrl+C 取消，Ctrl+L 清屏\x1b[0m\r\n')
+        xtermWritePrompt()
+        xtermInstance.onData(handleXtermInput)
+        const ro = new ResizeObserver(() => { try { xtermFitAddon?.fit() } catch {} })
+        ro.observe(xtermContainer.value)
+        xtermReady = true
+      } catch (e) { console.error('xterm init failed:', e) }
+    }
+
+    function xtermWritePrompt() {
+      if (!xtermInstance) return
+      const dev = termDeviceId.value ? uniqueDevices.value.find(d => d.id === termDeviceId.value)?.name || termDeviceId.value : '未连接'
+      xtermInstance.write(`\x1b[32m${dev}\x1b[0m:\x1b[34m${termCwd.value || '~'}\x1b[0m$ `)
+    }
+
+    function handleXtermInput(data) {
+      if (!xtermInstance || termLoading.value) return
+      if (data === '\r') {
+        xtermInstance.write('\r\n')
+        const cmd = xtermCurrentLine.trim()
+        if (cmd) { xtermCmdHistory.unshift(cmd); if (xtermCmdHistory.length > 100) xtermCmdHistory.pop(); runXtermCmd(cmd) }
+        else { xtermWritePrompt() }
+        xtermCurrentLine = ''; xtermHistoryIdx = -1
+      } else if (data === '\x7f' || data === '\b') {
+        if (xtermCurrentLine.length > 0) { xtermCurrentLine = xtermCurrentLine.slice(0, -1); xtermInstance.write('\b \b') }
+      } else if (data === '\x1b[A') {
+        if (xtermCmdHistory.length > 0 && xtermHistoryIdx < xtermCmdHistory.length - 1) { xtermHistoryIdx++; xtermReplaceLine(xtermCmdHistory[xtermHistoryIdx]) }
+      } else if (data === '\x1b[B') {
+        if (xtermHistoryIdx > 0) { xtermHistoryIdx--; xtermReplaceLine(xtermCmdHistory[xtermHistoryIdx]) }
+        else if (xtermHistoryIdx === 0) { xtermHistoryIdx = -1; xtermReplaceLine('') }
+      } else if (data === '\x03') {
+        xtermInstance.write('^C\r\n'); xtermCurrentLine = ''; xtermHistoryIdx = -1; xtermWritePrompt()
+      } else if (data === '\x0c') {
+        xtermInstance.clear(); xtermWritePrompt()
+      } else if (data >= ' ') {
+        xtermCurrentLine += data; xtermInstance.write(data)
+      }
+    }
+
+    function xtermReplaceLine(newLine) {
+      if (!xtermInstance) return
+      const len = xtermCurrentLine.length
+      xtermInstance.write('\b'.repeat(len) + ' '.repeat(len) + '\b'.repeat(len) + newLine)
+      xtermCurrentLine = newLine
+    }
+
+    async function runXtermCmd(cmd) {
+      if (!termDeviceId.value) { xtermInstance.writeln('\x1b[31m请先选择设备\x1b[0m'); xtermWritePrompt(); return }
+      termLoading.value = true
+      try {
+        const fullCmd = termCwd.value.trim() ? `cd '${termCwd.value.trim()}' && ${cmd}` : cmd
+        const result = await sendAndWaitCommand('terminal-exec', { device_id: termDeviceId.value, command: fullCmd })
+        if (result) { xtermInstance.write(result.replace(/\n/g, '\r\n')); if (!result.endsWith('\n')) xtermInstance.write('\r\n') }
+      } catch (e) {
+        xtermInstance.writeln('\x1b[31m' + (e.message || '执行失败').replace(/\n/g, '\r\n') + '\x1b[0m')
+      } finally { termLoading.value = false; xtermWritePrompt() }
+    }
+
+    function clearTerminal() { if (xtermInstance) { xtermInstance.clear(); xtermWritePrompt() } }
+
+    // ===== File Browser =====
+    const fbPathSegments = computed(() => {
+      if (!fbCurrentPath.value || fbCurrentPath.value === '~') return []
+      return fbCurrentPath.value.replace(/^~\/?/, '').split('/').filter(Boolean)
+    })
+
+    async function fbNavigate(path) {
+      if (!fbDeviceId.value) { toast('请先选择设备', 'error'); return }
+      const target = path || '~'
+      fbLoading.value = true
+      fbPathInput.value = target
+      try {
+        const result = await sendAndWaitCommand('file-list', { device_id: fbDeviceId.value, path: target })
+        fbFiles.value = JSON.parse(result || '[]')
+        fbCurrentPath.value = target
+      } catch (e) {
+        toast('加载目录失败: ' + e.message, 'error')
+      } finally {
+        fbLoading.value = false
+      }
+    }
+
+    function fbRefresh() { fbNavigate(fbCurrentPath.value || '~') }
+
+    function formatFileSize(bytes) {
+      if (bytes === 0) return '0 B'
+      const k = 1024, sizes = ['B', 'KB', 'MB', 'GB']
+      const i = Math.floor(Math.log(bytes) / Math.log(k))
+      return (bytes / Math.pow(k, i)).toFixed(i > 0 ? 1 : 0) + ' ' + sizes[i]
+    }
+
+    // ===== CI Tools - Jenkins =====
+    async function ciQueryBuild() {
+      if (!jenkinsBuildUrl.value.trim()) return
+      ciLoading.value = true
+      ciBuildDetail.value = null
+      try {
+        const result = await sendAndWaitCommand('jenkins-build-detail', { build_url: jenkinsBuildUrl.value })
+        ciBuildDetail.value = JSON.parse(result)
+        toast('已读取 Build 详情')
+      } catch (e) {
+        toast('查询 Build 失败: ' + e.message, 'error')
+      } finally {
+        ciLoading.value = false
+      }
+    }
+
+    function ciOpenRebuildDialog() {
+      if (!jenkinsBuildUrl.value.trim()) return
+      rebuildDialog.buildUrl = jenkinsBuildUrl.value.trim()
+      rebuildDialog.overrideEnabled = false
+      rebuildDialog.overrides = { GERRITID_QSSI: '', GERRITID_VENDOR: '', GERRITID_LE: '', GERRITID_MDEP: '' }
+      rebuildDialog.show = true
+    }
+
+    async function ciRebuild() {
+      ciLoading.value = true
+      try {
+        const overrides = {}
+        if (rebuildDialog.overrideEnabled) {
+          for (const [k, v] of Object.entries(rebuildDialog.overrides)) {
+            if (v.trim()) overrides[k] = v.trim()
+          }
+        }
+        const params = { build_url: rebuildDialog.buildUrl }
+        if (Object.keys(overrides).length > 0) params.parameter_overrides = overrides
+        const result = await sendAndWaitCommand('jenkins-rebuild', params)
+        const data = JSON.parse(result)
+        if (data.build_url) jenkinsBuildUrl.value = data.build_url
+        rebuildDialog.show = false
+        toast(data.message || '已触发 Rebuild')
+      } catch (e) {
+        toast('Rebuild 失败: ' + e.message, 'error')
+      } finally {
+        ciLoading.value = false
+      }
+    }
+
+    // ===== CI Tools - Gerrit (structured search) =====
+    const buildGerritQueryPreview = computed(() => {
+      const parts = [`status:${gerritStatus.value}`]
+      if (gerritExcludeWip.value) parts.push('-is:wip')
+      if (gerritBranch.value.trim()) parts.push(`branch:${gerritBranch.value.trim()}`)
+      if (gerritOwner.value.trim()) parts.push(`owner:${gerritOwner.value.trim()}`)
+      if (gerritKeyword.value.trim()) parts.push(gerritKeyword.value.trim())
+      return parts.join(' ')
+    })
+
+    async function ciSearchGerrit(page) {
+      page = page || 1
+      if (page < 1) return
+      const query = buildGerritQueryPreview.value
+      if (!query) return
+      const b = gerritBranch.value.trim()
+      if (b && !gerritBranches.value.includes(b)) {
+        gerritBranches.value.push(b)
+        localStorage.setItem('gerrit_branches', JSON.stringify(gerritBranches.value))
+      }
+      ciLoading.value = true
+      ciGerritSearched.value = true
+      const limit = gerritPageSize.value
+      const offset = (page - 1) * limit
+      try {
+        const result = await sendAndWaitCommand('gerrit-search', { query, limit, offset })
+        const data = JSON.parse(result)
+        ciGerritResults.value = data.changes || []
+        gerritHasMore.value = data.has_more || false
+        gerritPage.value = page
+        toast(`第 ${page} 页，共 ${ciGerritResults.value.length} 条`)
+      } catch (e) {
+        toast('搜索 Gerrit 失败: ' + e.message, 'error')
+      } finally {
+        ciLoading.value = false
+      }
+    }
+
+    function gerritStatusClass(status) {
+      const m = { 'NEW': 'bg-blue-500/20 text-blue-400', 'MERGED': 'bg-emerald-500/20 text-emerald-400', 'ABANDONED': 'bg-gray-500/20 text-gray-400' }
+      return m[status] || 'bg-gray-500/20 text-gray-400'
+    }
+
+    function actionLabel(action) {
+      const map = {
+        'sync': 'Repo 同步', 'force-sync': '强制同步', 'build': '编译构建',
+        'cherry': 'Cherry-Pick', 'custom': '自定义命令', 'jenkins-rebuild': 'Jenkins 重建',
+        'terminal-exec': '终端命令', 'file-list': '文件浏览',
+        'jenkins-list-jobs': 'Jenkins 作业列表', 'jenkins-job-detail': 'Jenkins 作业详情',
+        'jenkins-trigger-build': 'Jenkins 构建', 'jenkins-build-detail': 'Jenkins 构建详情',
+        'gerrit-search': 'Gerrit 搜索'
+      }
+      return map[action] || action
+    }
+
+    function statusLabel(status) {
+      const map = { 'pending': '等待中', 'running': '执行中', 'success': '成功', 'failed': '失败', 'canceled': '已取消' }
+      return map[status] || status
+    }
+
+    function statusBadgeClass(status) {
+      const m = {
+        'pending': 'px-2 py-0.5 text-xs rounded-full font-medium bg-yellow-500/20 text-yellow-400',
+        'running': 'px-2 py-0.5 text-xs rounded-full font-medium bg-blue-500/20 text-blue-400',
+        'success': 'px-2 py-0.5 text-xs rounded-full font-medium bg-emerald-500/20 text-emerald-400',
+        'failed': 'px-2 py-0.5 text-xs rounded-full font-medium bg-red-500/20 text-red-400',
+        'canceled': 'px-2 py-0.5 text-xs rounded-full font-medium bg-gray-500/20 text-gray-400'
+      }
+      return m[status] || m['canceled']
+    }
+
+    function statusDotClass(status) {
+      const m = {
+        'pending': 'w-2 h-2 rounded-full bg-yellow-400 shrink-0',
+        'running': 'w-2 h-2 rounded-full bg-blue-400 pulse-dot shrink-0',
+        'success': 'w-2 h-2 rounded-full bg-emerald-400 shrink-0',
+        'failed': 'w-2 h-2 rounded-full bg-red-400 shrink-0',
+        'canceled': 'w-2 h-2 rounded-full bg-gray-500 shrink-0'
+      }
+      return m[status] || m['canceled']
+    }
+
+    function statusTextClass(status) {
+      const m = { 'pending': 'text-yellow-400', 'running': 'text-blue-400', 'success': 'text-emerald-400', 'failed': 'text-red-400' }
+      return m[status] || 'text-gray-400'
+    }
+
+    function formatTime(ts) {
+      if (!ts) return '-'
+      return new Date(ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    }
+
+    function formatTimeShort(ts) {
+      if (!ts) return '-'
+      return new Date(ts).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    }
+
+    function formatTimeFull(ts) {
+      if (!ts) return '-'
+      return new Date(ts).toLocaleString('zh-CN')
+    }
+
+    let refreshTimer = null
+    let countdownTimer = null
+
+    const TIMEOUT_PENDING_MS = 5 * 60 * 1000
+    const TIMEOUT_RUNNING_MS = 30 * 60 * 1000
+
+    async function autoTimeoutCommands() {
+      const now = Date.now()
+      for (const cmd of commands.value) {
+        const created = new Date(cmd.created_at).getTime()
+        const updated = new Date(cmd.updated_at).getTime()
+        if (cmd.status === 'pending' && now - created > TIMEOUT_PENDING_MS) {
+          try {
+            await apiCall('PUT', `/commands/${cmd.id}`, { status: 'failed', result: '命令等待超时 (5分钟未被桌面端执行)' })
+          } catch {}
+        } else if (cmd.status === 'running' && now - updated > TIMEOUT_RUNNING_MS) {
+          try {
+            await apiCall('PUT', `/commands/${cmd.id}`, { status: 'failed', result: '命令执行超时 (30分钟未完成)' })
+          } catch {}
+        }
+      }
+    }
+
+    function startAutoRefresh() {
+      stopAutoRefresh()
+      refreshCountdown.value = settings.refreshInterval
+      countdownTimer = setInterval(() => {
+        refreshCountdown.value--
+        if (refreshCountdown.value <= 0) {
+          refreshCountdown.value = settings.refreshInterval
+        }
+      }, 1000)
+      refreshTimer = setInterval(() => {
+        fetchCommands().then(() => autoTimeoutCommands())
+        checkHeartbeat()
+        refreshCountdown.value = settings.refreshInterval
+      }, settings.refreshInterval * 1000)
+    }
+
+    function stopAutoRefresh() {
+      if (refreshTimer) clearInterval(refreshTimer)
+      if (countdownTimer) clearInterval(countdownTimer)
+    }
+
+    onMounted(() => {
+      const params = new URLSearchParams(window.location.search)
+      const urlKey = params.get('key')
+      const urlApi = params.get('api')
+      if (urlKey) {
+        settings.apiKey = urlKey
+        localStorage.setItem('mdc_api_key', urlKey)
+      }
+      if (urlApi) {
+        settings.apiUrl = urlApi
+        localStorage.setItem('mdc_api_url', urlApi)
+      }
+      if (urlKey || urlApi) {
+        window.history.replaceState({}, '', window.location.pathname)
+      }
+
+      checkConnection()
+      checkHeartbeat()
+      fetchWorkspaces()
+      fetchCommands()
+      startAutoRefresh()
+    })
+
+    onUnmounted(() => {
+      stopAutoRefresh()
+    })
+
+    watch(currentPage, (page) => {
+      if (page === 'history') fetchCommands()
+      if (page === 'dashboard') { fetchCommands(); checkHeartbeat() }
+      if (page === 'terminal') nextTick(() => initXterm())
+    })
+
+    watch(() => settings.refreshInterval, () => {
+      startAutoRefresh()
+    })
+
+    return {
+      currentPage, connected, desktopOnline, heartbeatData, sending, toasts,
+      commands, workspaces, selectedWorkspace, expandedCmd,
+      historyFilter, historySearch, refreshCountdown, showApiKey,
+      connectionTestResult, workspaceSyncInfo,
+      showBuildDialog, showCherryDialog, showCustomDialog, showJenkinsDialog, showAddWorkspace,
+      buildScript, cherryIds, customCommand, jenkinsRef,
+      newWorkspace, confirmDialog, settings, navItems, filterTabs,
+      buildTemplates, quickCommands, apiBaseUrl,
+      stats, pendingCount, recentCommands, filteredCommands,
+      uniqueDevices, mobileNavItems,
+      // Terminal (xterm.js)
+      xtermContainer, termDeviceId, termCwd, termLoading,
+      clearTerminal,
+      // File Browser
+      fbDeviceId, fbCurrentPath, fbPathInput, fbFiles, fbLoading,
+      fbPathSegments, fbNavigate, fbRefresh, formatFileSize,
+      // CI Tools - Jenkins
+      ciTab, ciLoading, jenkinsBuildUrl, ciBuildDetail, rebuildDialog,
+      ciQueryBuild, ciOpenRebuildDialog, ciRebuild,
+      // CI Tools - Gerrit
+      gerritStatus, gerritExcludeWip, gerritBranch, gerritBranches,
+      gerritOwner, gerritKeyword, gerritPageSize, gerritPage, gerritHasMore,
+      ciGerritResults, ciGerritSearched, buildGerritQueryPreview,
+      ciSearchGerrit, gerritStatusClass,
+      // Existing
+      toast, checkHeartbeat, executeAction, batchAction,
+      submitBuild, submitCherry, submitCustom, submitJenkins,
+      addWorkspace, deleteWorkspace, selectAndOperate,
+      cancelCommand, retryCommand, refreshSingleCommand,
+      toggleExpand, saveSettings, generateApiKey, testConnection,
+      clearCommandHistory, clearLocalStorage, copyToClipboard,
+      fetchCommands, fetchWorkspaces,
+      actionLabel, statusLabel, statusBadgeClass, statusDotClass, statusTextClass,
+      formatTime, formatTimeShort, formatTimeFull
+    }
+  }
+}).mount('#app')
+</script>
+</body>
+</html>
