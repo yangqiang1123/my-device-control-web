@@ -716,7 +716,9 @@
             </div>
             <div class="flex items-center gap-2">
               <label class="text-xs text-gray-400 shrink-0 w-16">Owner</label>
-              <input v-model="gerritOwner" class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-500" placeholder="如：yangqiang0502@thundersoft.com" />
+              <div class="flex-1 flex gap-1">
+                <input v-model="gerritOwner" @blur="autoFillOwnerSuffix" class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-500" placeholder="输入用户名自动补全 @thundersoft.com" />
+              </div>
             </div>
             <div class="flex items-center gap-2">
               <label class="text-xs text-gray-400 shrink-0 w-16">关键字</label>
@@ -977,10 +979,11 @@ createApp({
     const termLoading = ref(false)
     let xtermInstance = null
     let xtermFitAddon = null
+    let xtermResizeObs = null
     let xtermCurrentLine = ''
     let xtermCmdHistory = []
     let xtermHistoryIdx = -1
-    let xtermReady = false
+    let xtermModCache = null
 
     // File Browser state
     const fbDeviceId = ref('')
@@ -1414,13 +1417,28 @@ createApp({
     })
 
     // ===== Terminal (xterm.js) =====
+    const CWD_MARKER = '__MDC_CWD__'
+
+    async function loadXtermModules() {
+      if (xtermModCache) return xtermModCache
+      xtermModCache = await Promise.all([
+        import('https://cdn.jsdelivr.net/npm/xterm@5.3.0/+esm'),
+        import('https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/+esm')
+      ])
+      return xtermModCache
+    }
+
+    function disposeXterm() {
+      if (xtermResizeObs) { xtermResizeObs.disconnect(); xtermResizeObs = null }
+      if (xtermInstance) { xtermInstance.dispose(); xtermInstance = null }
+      xtermFitAddon = null
+    }
+
     async function initXterm() {
-      if (xtermReady || !xtermContainer.value) return
+      if (!xtermContainer.value) return
+      disposeXterm()
       try {
-        const [xtermMod, fitMod] = await Promise.all([
-          import('https://cdn.jsdelivr.net/npm/xterm@5.3.0/+esm'),
-          import('https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/+esm')
-        ])
+        const [xtermMod, fitMod] = await loadXtermModules()
         xtermInstance = new xtermMod.Terminal({
           cursorBlink: true,
           theme: { background: '#030712', foreground: '#d1d5db', cursor: '#3b82f6', selectionBackground: 'rgba(59,130,246,0.3)' },
@@ -1431,12 +1449,12 @@ createApp({
         xtermInstance.open(xtermContainer.value)
         xtermFitAddon.fit()
         xtermInstance.writeln('\x1b[1;34m══ 远程终端 ══\x1b[0m')
-        xtermInstance.writeln('\x1b[90m选择设备后输入命令，Enter 执行，↑↓ 切换历史，Ctrl+C 取消，Ctrl+L 清屏\x1b[0m\r\n')
+        xtermInstance.writeln('\x1b[90mEnter 执行，↑↓ 历史，Ctrl+C 取消，Ctrl+L 清屏\x1b[0m\r\n')
         xtermWritePrompt()
         xtermInstance.onData(handleXtermInput)
-        const ro = new ResizeObserver(() => { try { xtermFitAddon?.fit() } catch {} })
-        ro.observe(xtermContainer.value)
-        xtermReady = true
+        xtermInstance.focus()
+        xtermResizeObs = new ResizeObserver(() => { try { xtermFitAddon?.fit() } catch {} })
+        xtermResizeObs.observe(xtermContainer.value)
       } catch (e) { console.error('xterm init failed:', e) }
     }
 
@@ -1447,7 +1465,11 @@ createApp({
     }
 
     function handleXtermInput(data) {
-      if (!xtermInstance || termLoading.value) return
+      if (!xtermInstance) return
+      if (termLoading.value) {
+        if (data === '\x03') { termLoading.value = false; xtermInstance.write('^C\r\n'); xtermWritePrompt() }
+        return
+      }
       if (data === '\r') {
         xtermInstance.write('\r\n')
         const cmd = xtermCurrentLine.trim()
@@ -1481,15 +1503,28 @@ createApp({
       if (!termDeviceId.value) { xtermInstance.writeln('\x1b[31m请先选择设备\x1b[0m'); xtermWritePrompt(); return }
       termLoading.value = true
       try {
-        const fullCmd = termCwd.value.trim() ? `cd '${termCwd.value.trim()}' && ${cmd}` : cmd
+        const cwdPrefix = termCwd.value.trim() ? `cd '${termCwd.value.trim()}' && ` : ''
+        const fullCmd = `${cwdPrefix}${cmd}; echo "${CWD_MARKER}$(pwd)${CWD_MARKER}"`
         const result = await sendAndWaitCommand('terminal-exec', { device_id: termDeviceId.value, command: fullCmd })
-        if (result) { xtermInstance.write(result.replace(/\n/g, '\r\n')); if (!result.endsWith('\n')) xtermInstance.write('\r\n') }
+        if (result) {
+          let output = result
+          const cwdMatch = output.match(new RegExp(`${CWD_MARKER}(.+?)${CWD_MARKER}`))
+          if (cwdMatch) {
+            termCwd.value = cwdMatch[1]
+            output = output.replace(new RegExp(`\\n?${CWD_MARKER}.+?${CWD_MARKER}\\n?`), '')
+          }
+          if (output.trim()) { xtermInstance.write(output.replace(/\n/g, '\r\n')); if (!output.endsWith('\n')) xtermInstance.write('\r\n') }
+        }
       } catch (e) {
         xtermInstance.writeln('\x1b[31m' + (e.message || '执行失败').replace(/\n/g, '\r\n') + '\x1b[0m')
-      } finally { termLoading.value = false; xtermWritePrompt() }
+      } finally {
+        termLoading.value = false
+        xtermWritePrompt()
+        nextTick(() => { if (xtermInstance) xtermInstance.focus() })
+      }
     }
 
-    function clearTerminal() { if (xtermInstance) { xtermInstance.clear(); xtermWritePrompt() } }
+    function clearTerminal() { if (xtermInstance) { xtermInstance.clear(); xtermWritePrompt(); xtermInstance.focus() } }
 
     // ===== File Browser =====
     const fbPathSegments = computed(() => {
@@ -1567,6 +1602,11 @@ createApp({
       } finally {
         ciLoading.value = false
       }
+    }
+
+    function autoFillOwnerSuffix() {
+      const v = gerritOwner.value.trim()
+      if (v && !v.includes('@')) gerritOwner.value = v + '@thundersoft.com'
     }
 
     // ===== CI Tools - Gerrit (structured search) =====
@@ -1742,10 +1782,11 @@ createApp({
       stopAutoRefresh()
     })
 
-    watch(currentPage, (page) => {
-      if (page === 'history') fetchCommands()
-      if (page === 'dashboard') { fetchCommands(); checkHeartbeat() }
-      if (page === 'terminal') nextTick(() => initXterm())
+    watch(currentPage, (newPage, oldPage) => {
+      if (oldPage === 'terminal') disposeXterm()
+      if (newPage === 'history') fetchCommands()
+      if (newPage === 'dashboard') { fetchCommands(); checkHeartbeat() }
+      if (newPage === 'terminal') nextTick(() => initXterm())
     })
 
     watch(() => settings.refreshInterval, () => {
@@ -1776,7 +1817,7 @@ createApp({
       gerritStatus, gerritExcludeWip, gerritBranch, gerritBranches,
       gerritOwner, gerritKeyword, gerritPageSize, gerritPage, gerritHasMore,
       ciGerritResults, ciGerritSearched, buildGerritQueryPreview,
-      ciSearchGerrit, gerritStatusClass,
+      ciSearchGerrit, gerritStatusClass, autoFillOwnerSuffix,
       // Existing
       toast, checkHeartbeat, executeAction, batchAction,
       submitBuild, submitCherry, submitCustom, submitJenkins,
