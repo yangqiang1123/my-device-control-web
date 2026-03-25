@@ -903,6 +903,10 @@
           <label class="text-sm text-gray-400 mb-1 block">路径</label>
           <input v-model="newWorkspace.path" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500" placeholder="远程工作区路径" />
         </div>
+        <div class="flex items-center gap-2 pt-1">
+          <input type="checkbox" id="includeBranches" v-model="newWorkspace.includeBranches" class="rounded accent-blue-500" />
+          <label for="includeBranches" class="text-sm text-gray-400 cursor-pointer">包含子分支 (自动添加 mdep 和 vendor 工作区)</label>
+        </div>
       </div>
       <div class="flex gap-3 justify-end mt-5">
         <button @click="showAddWorkspace = false" class="px-4 py-2 text-sm text-gray-400 hover:text-gray-200">取消</button>
@@ -962,7 +966,7 @@ createApp({
     const customCommand = ref('')
     const jenkinsRef = ref('')
 
-    const newWorkspace = reactive({ no: '', name: '', device_id: '', device_name: '', path: '' })
+    const newWorkspace = reactive({ no: '', name: '', device_id: '', device_name: '', path: '', includeBranches: false })
     const confirmDialog = reactive({ show: false, title: '', message: '', onConfirm: () => {} })
 
     const settings = reactive({
@@ -1245,22 +1249,41 @@ createApp({
     }
 
     async function addWorkspace() {
-      const ws = {
+      const basePath = newWorkspace.path.replace(/\/+$/, '')
+      const wsList = [{
         id: newWorkspace.no + '_' + Date.now(),
         no: newWorkspace.no,
         name: newWorkspace.name,
         device_id: newWorkspace.device_id,
         device_name: newWorkspace.device_name,
-        path: newWorkspace.path
+        path: basePath
+      }]
+      if (newWorkspace.includeBranches) {
+        wsList.push({
+          id: newWorkspace.no + '_mdep_' + Date.now(),
+          no: newWorkspace.no ? newWorkspace.no + '_mdep' : 'mdep_' + Date.now(),
+          name: newWorkspace.name + ' (mdep)',
+          device_id: newWorkspace.device_id,
+          device_name: newWorkspace.device_name,
+          path: basePath + '/mdep'
+        })
+        wsList.push({
+          id: newWorkspace.no + '_vendor_' + Date.now(),
+          no: newWorkspace.no ? newWorkspace.no + '_vendor' : 'vendor_' + Date.now(),
+          name: newWorkspace.name + ' (vendor)',
+          device_id: newWorkspace.device_id,
+          device_name: newWorkspace.device_name,
+          path: basePath + '/vendor'
+        })
       }
-      workspaces.value.push(ws)
+      for (const ws of wsList) {
+        workspaces.value.push(ws)
+        try { await apiCall('POST', '/workspaces', { workspace: ws }) } catch (e) {}
+      }
       localStorage.setItem('mdc_workspaces', JSON.stringify(workspaces.value))
-      try { await apiCall('POST', '/workspaces', { workspace: ws }) } catch (e) {
-        toast('同步到服务器失败，仅保存到本地', 'error')
-      }
       showAddWorkspace.value = false
-      Object.assign(newWorkspace, { no: '', name: '', device_id: '', device_name: '', path: '' })
-      toast('工作区已添加')
+      Object.assign(newWorkspace, { no: '', name: '', device_id: '', device_name: '', path: '', includeBranches: false })
+      toast(wsList.length > 1 ? `已添加 ${wsList.length} 个工作区（含 mdep/vendor）` : '工作区已添加')
     }
 
     async function deleteWorkspace(id) {
