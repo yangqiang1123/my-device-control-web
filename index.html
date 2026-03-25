@@ -1318,13 +1318,20 @@ createApp({
     }
 
     async function deleteWorkspace(id) {
+      const ws = workspaces.value.find(w => w.id === id)
+      const subs = ws ? getWebSubBranches(ws) : []
       confirmDialog.title = '删除工作区'
-      confirmDialog.message = '确认删除该工作区？'
+      confirmDialog.message = subs.length > 0
+        ? `确认删除该工作区及其 ${subs.length} 个子分支？`
+        : '确认删除该工作区？'
       confirmDialog.onConfirm = async () => {
-        workspaces.value = workspaces.value.filter(w => w.id !== id)
+        const idsToDelete = [id, ...subs.map(s => s.id)]
+        workspaces.value = workspaces.value.filter(w => !idsToDelete.includes(w.id))
         localStorage.setItem('mdc_workspaces', JSON.stringify(workspaces.value))
-        if (selectedWorkspace.value?.id === id) selectedWorkspace.value = null
-        try { await apiCall('DELETE', `/workspaces?id=${id}`) } catch {}
+        if (idsToDelete.includes(selectedWorkspace.value?.id)) selectedWorkspace.value = null
+        for (const did of idsToDelete) {
+          try { await apiCall('DELETE', `/workspaces?id=${did}`) } catch {}
+        }
         toast('工作区已删除')
       }
       confirmDialog.show = true
