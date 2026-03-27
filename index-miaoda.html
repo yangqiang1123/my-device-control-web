@@ -284,8 +284,9 @@
         <div class="flex items-center justify-between mb-4 md:mb-6">
           <h2 class="text-lg md:text-xl font-bold">命令历史</h2>
           <div class="flex items-center gap-2 md:gap-3">
-            <span class="text-[10px] md:text-xs text-gray-500">{{ refreshCountdown }}s</span>
-            <button @click="fetchCommands(true)" class="text-xs md:text-sm text-brand-500 hover:text-brand-400 flex items-center gap-1">
+            <span v-if="isIdle" class="text-[10px] md:text-xs text-yellow-500">已暂停（点击任意处恢复）</span>
+            <span v-else class="text-[10px] md:text-xs text-gray-500">{{ refreshCountdown }}s</span>
+            <button @click="fetchCommands(true); trackUserActivity()" class="text-xs md:text-sm text-brand-500 hover:text-brand-400 flex items-center gap-1">
               🔄 <span class="hidden sm:inline">刷新</span>
             </button>
           </div>
@@ -397,64 +398,71 @@
 
       <!-- ==================== Workspaces ==================== -->
       <div v-if="currentPage === 'workspaces'" class="p-4 md:p-6 max-w-5xl mx-auto">
-        <div class="flex items-center justify-between mb-4 md:mb-6">
-          <h2 class="text-lg md:text-xl font-bold">工作区管理</h2>
+        <div class="flex items-center justify-between mb-5">
+          <div>
+            <h2 class="text-lg md:text-xl font-bold">工作区管理</h2>
+            <p v-if="workspaceSyncInfo" class="text-xs text-gray-500 mt-1">{{ workspaceSyncInfo }}</p>
+          </div>
           <div class="flex items-center gap-2">
-            <button @click="syncFromDesktop" :disabled="syncingDesktop" class="px-3 py-2 bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30 rounded-lg text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-              {{ syncingDesktop ? '⏳ 同步中...' : '🔄 同步桌面端' }}
+            <button @click="syncFromDesktop" :disabled="syncingDesktop"
+                    class="flex items-center gap-1.5 px-3 py-2 bg-gray-800 border border-gray-700 hover:border-cyan-600/50 hover:bg-cyan-600/10 rounded-lg text-sm text-cyan-400 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+              <span v-if="syncingDesktop" class="spinner"></span>
+              <svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              {{ syncingDesktop ? '同步中' : '同步' }}
             </button>
-            <button @click="showAddWorkspace = true" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm font-medium transition-colors">
-              + 添加
+            <button @click="showAddWorkspace = true" class="flex items-center gap-1.5 px-3 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm font-medium transition-colors">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+              添加
             </button>
           </div>
         </div>
 
-        <!-- Sync Info -->
-        <div v-if="workspaceSyncInfo" class="mb-4 p-3 bg-gray-900 border border-gray-800 rounded-lg text-xs text-gray-500">
-          工作区数据来源: {{ workspaceSyncInfo }}
+        <div v-if="workspaces.length === 0" class="text-center py-20 text-gray-500">
+          <svg class="w-12 h-12 mx-auto mb-3 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" /></svg>
+          <div class="font-medium">暂无工作区</div>
+          <div class="text-sm mt-1">点击「同步」从桌面端拉取，或手动「添加」</div>
         </div>
 
-        <div v-if="workspaces.length === 0" class="text-center py-16 text-gray-500">
-          <div class="text-4xl mb-3">📦</div>
-          <div>暂无工作区</div>
-          <div class="text-sm mt-2">可手动添加，或等待桌面应用同步</div>
-        </div>
-
-        <div v-else class="space-y-3">
+        <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div v-for="ws in webMainWorkspaces" :key="ws.id"
-               class="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <div class="flex items-center justify-between">
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
-                  <span class="font-medium">[{{ ws.no }}] {{ ws.name }}</span>
-                  <span v-if="selectedWorkspace?.id === ws.id" class="px-1.5 py-0.5 text-xs bg-brand-500/20 text-brand-400 rounded">当前选中</span>
-                </div>
-                <div class="text-xs text-gray-500 mt-1 space-x-3">
-                  <span>设备: {{ ws.device_name || ws.device_id || '-' }}</span>
-                  <span v-if="ws.path">路径: {{ ws.path }}</span>
-                </div>
+               class="relative bg-gray-900/80 border rounded-xl p-4 transition-all group hover:shadow-lg hover:shadow-black/20 cursor-default"
+               :class="selectedWorkspace?.id === ws.id
+                 ? 'border-brand-500/40 bg-brand-500/5 ring-1 ring-brand-500/20'
+                 : 'border-gray-800 hover:border-gray-600'">
+            <div class="flex items-start justify-between mb-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-sm font-semibold text-gray-100 truncate">[{{ ws.no }}] {{ ws.name }}</span>
+                <span v-if="selectedWorkspace?.id === ws.id"
+                      class="px-1.5 py-0.5 text-[10px] bg-brand-500/20 text-brand-400 rounded-full font-medium shrink-0">选中</span>
               </div>
-              <div class="flex items-center gap-2 shrink-0 ml-4">
-                <button @click="selectAndOperate(ws)" class="text-xs text-brand-500 hover:text-brand-400">操作</button>
-                <button @click="deleteWorkspace(ws.id)" class="text-xs text-gray-500 hover:text-red-400">删除</button>
+              <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2">
+                <button @click="selectAndOperate(ws)" class="p-1.5 rounded-md hover:bg-brand-500/10 text-brand-400 text-xs transition-colors" title="操作">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                </button>
+                <button @click="deleteWorkspace(ws.id)" class="p-1.5 rounded-md hover:bg-red-500/10 text-gray-500 hover:text-red-400 text-xs transition-colors" title="删除">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
               </div>
             </div>
-            <!-- 子分支内联显示 -->
-            <div v-if="getWebSubBranches(ws).length > 0" class="mt-3 pt-3 border-t border-gray-800/50 space-y-2">
-              <div v-for="sub in getWebSubBranches(ws)" :key="sub.id"
-                   class="flex items-center justify-between bg-gray-800/30 rounded-lg px-3 py-2">
-                <div class="flex items-center gap-2 min-w-0 flex-1">
-                  <span class="px-1.5 py-0.5 text-xs rounded font-medium"
-                        :class="sub.path.endsWith('/mdep') ? 'bg-gray-700 text-gray-300' : 'bg-emerald-900/40 text-emerald-400'">
-                    {{ sub.path.endsWith('/mdep') ? 'mdep' : 'vendor' }}
-                  </span>
-                  <span class="text-xs text-gray-500 font-mono truncate">{{ sub.path }}</span>
-                </div>
-                <div class="flex items-center gap-2 shrink-0 ml-2">
-                  <button @click="selectAndOperate(sub)" class="text-xs text-brand-500 hover:text-brand-400">操作</button>
-                  <button @click="deleteWorkspace(sub.id)" class="text-xs text-gray-500 hover:text-red-400">删除</button>
-                </div>
-              </div>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500">
+              <span class="flex items-center gap-1">
+                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                {{ ws.device_name || ws.device_id || '-' }}
+              </span>
+              <span v-if="ws.path" class="flex items-center gap-1 font-mono truncate max-w-[220px]" :title="ws.path">
+                <svg class="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                {{ ws.path }}
+              </span>
+            </div>
+            <div v-if="getWebSubBranches(ws).length > 0" class="mt-3 flex flex-wrap gap-1.5">
+              <button v-for="sub in getWebSubBranches(ws)" :key="sub.id"
+                      @click.stop="selectAndOperate(sub)"
+                      class="px-2 py-0.5 text-[11px] rounded-md border transition-all"
+                      :class="sub.path.endsWith('/mdep')
+                        ? 'border-gray-700/80 bg-gray-800/40 text-gray-400 hover:border-gray-500 hover:text-gray-300'
+                        : 'border-emerald-800/40 bg-emerald-900/15 text-emerald-400/80 hover:border-emerald-600/50 hover:text-emerald-300'">
+                {{ sub.path.endsWith('/mdep') ? 'mdep' : 'vendor' }}
+              </button>
             </div>
           </div>
         </div>
@@ -655,19 +663,116 @@
           <button @click="ciTab = 'gerrit'" :class="['px-4 py-1.5 rounded-md text-xs font-medium transition-all', ciTab === 'gerrit' ? 'bg-brand-600 text-white' : 'text-gray-400']">Gerrit</button>
         </div>
 
-        <!-- Jenkins Tab: Build URL → 查询/Rebuild -->
+        <!-- Jenkins Tab -->
         <div v-if="ciTab === 'jenkins'">
+          <!-- Jenkins Server Selection -->
           <div class="space-y-3 mb-4">
             <div>
-              <label class="text-xs text-gray-400 mb-1 block">已开始 Build URL</label>
-              <input v-model="jenkinsBuildUrl" class="w-full bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-brand-500"
-                     placeholder="如：http://10.0.80.24:8080/job/VerifyBuild_for_IOT_6490/28452/" />
+              <label class="text-xs text-gray-400 mb-1 block">Jenkins 服务器</label>
+              <div class="flex items-center gap-2">
+                <select v-model="jenkinsSelectedServer" class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500">
+                  <option value="">默认服务器</option>
+                  <option v-for="s in jenkinsServerList" :key="s.id" :value="s.id">{{ s.name || s.url }}</option>
+                </select>
+                <button @click="ciRefreshConfig" :disabled="ciLoading" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs shrink-0 disabled:opacity-40">刷新配置</button>
+                <button @click="ciTestJenkins" :disabled="ciLoading" class="px-3 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-xs shrink-0 disabled:opacity-40">测试连接</button>
+                <button @click="ciLoadJobs" :disabled="ciLoading" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs shrink-0 disabled:opacity-40">加载作业</button>
+                <button @click="ciClearJenkins" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs shrink-0 text-gray-400 border border-gray-700">清除结果</button>
+              </div>
+            </div>
+
+            <!-- Jenkins Jobs Table -->
+            <div v-if="jenkinsJobList.length > 0" class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+              <div class="text-xs px-3 py-2 border-b border-gray-800 text-gray-500 font-medium">作业列表</div>
+              <div v-for="j in jenkinsJobList" :key="j.url"
+                   class="text-xs px-3 py-2 border-b border-gray-800/50 hover:bg-gray-800/50 text-gray-300 truncate">
+                {{ j.name }}
+              </div>
+            </div>
+
+            <!-- VB Build Number -->
+            <div>
+              <label class="text-xs text-gray-400 mb-1 block">VB Build 编号</label>
+              <div class="flex items-center gap-2">
+                <input v-model="jenkinsBuildNum" type="text" class="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-brand-500"
+                       placeholder="如 29033" style="width: 160px" />
+                <span v-if="jenkinsBuildNum.trim() && getSelectedServerUrl()" class="text-xs text-gray-500 font-mono truncate">{{ getSelectedServerUrl() }}/{{ jenkinsBuildNum.trim() }}/</span>
+              </div>
+            </div>
+            <!-- Build History by User -->
+            <div>
+              <label class="text-xs text-gray-400 mb-1 block">构建历史</label>
+              <div class="flex items-center gap-2">
+                <input v-model="jenkinsUserFilter" type="text" class="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
+                       placeholder="输入用户名查询" style="width: 200px" />
+                <button @click="ciSearchBuildsByUser" :disabled="ciLoading || !jenkinsUserFilter.trim()" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs disabled:opacity-40">
+                  <span v-if="ciUserBuildsLoading" class="spinner mr-1"></span>查询
+                </button>
+              </div>
+            </div>
+            <!-- User Builds Results -->
+            <div v-if="jenkinsUserBuilds.length" class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-800">
+                <span class="text-xs text-gray-400 font-medium">构建历史（{{ jenkinsUserBuilds.length }} 条）</span>
+                <button @click="jenkinsUserBuilds.length = 0" class="text-xs text-gray-500 hover:text-gray-300">关闭</button>
+              </div>
+              <div class="max-h-64 overflow-y-auto">
+                <div v-for="b in jenkinsUserBuilds" :key="b.number" @click="jenkinsBuildNum = String(b.number)"
+                     class="flex items-center gap-2 px-3 py-2 border-b border-gray-800/50 hover:bg-gray-800/50 cursor-pointer text-xs">
+                  <span class="text-brand-400 font-mono w-14 shrink-0">#{{ b.number }}</span>
+                  <span class="flex-1 text-gray-300 truncate">{{ b.display_name }}</span>
+                  <span :class="b.result === 'SUCCESS' ? 'text-emerald-400' : b.result === 'FAILURE' ? 'text-red-400' : 'text-yellow-400'" class="shrink-0 w-16 text-right">
+                    {{ b.result || '进行中' }}
+                  </span>
+                  <span class="text-gray-600 shrink-0 w-28 text-right">{{ ciFormatTs(b.timestamp) }}</span>
+                </div>
+              </div>
+            </div>
+            <div>
+              <button @click="ciLoadJobDetail" :disabled="ciLoading || !jenkinsBuildNum.trim()" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm font-medium disabled:opacity-40">
+                <span v-if="ciLoading" class="spinner mr-1"></span>读取 Build Parameters
+              </button>
+            </div>
+          </div>
+
+          <!-- Job Detail + Build with Parameters -->
+          <div v-if="jenkinsJobDetail" class="bg-gray-900 border border-gray-800 rounded-xl p-4 mb-4">
+            <div class="flex items-center justify-between mb-2">
+              <strong class="text-sm text-gray-200">{{ jenkinsJobDetail.name }}</strong>
+              <a :href="jenkinsJobDetail.url" target="_blank" class="text-xs text-brand-400 hover:text-brand-300">打开 Job 页面</a>
+            </div>
+            <div class="text-xs text-gray-500 mb-3 space-x-3">
+              <span>可构建：{{ jenkinsJobDetail.buildable ? '是' : '否' }}</span>
+            </div>
+            <div v-if="jenkinsJobDetail.parameters && jenkinsJobDetail.parameters.length > 0" class="space-y-2 mb-3">
+              <div v-for="param in jenkinsJobDetail.parameters" :key="param.name" class="flex items-center gap-2">
+                <label class="text-xs text-gray-400 w-40 shrink-0 truncate" :title="param.name">{{ param.name }}</label>
+                <input v-model="jenkinsParamValues[param.name]" class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-brand-500"
+                       :placeholder="param.default_value || param.description || ''" />
+              </div>
+            </div>
+            <button @click="ciTriggerBuild" :disabled="ciLoading" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-medium disabled:opacity-40">
+              <span v-if="ciLoading" class="spinner mr-1"></span>Build with Parameters
+            </button>
+          </div>
+
+          <div class="border-t border-gray-800 my-4"></div>
+
+          <!-- Query / Rebuild by Build Number -->
+          <div class="space-y-3 mb-4">
+            <div>
+              <label class="text-xs text-gray-400 mb-1 block">查询 Build 编号</label>
+              <div class="flex items-center gap-2">
+                <input v-model="jenkinsQueryNum" type="text" class="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-brand-500"
+                       placeholder="如 28452" style="width: 160px" />
+                <span v-if="jenkinsQueryNum.trim() && getSelectedServerUrl()" class="text-xs text-gray-500 font-mono truncate">{{ getSelectedServerUrl() }}/{{ jenkinsQueryNum.trim() }}/</span>
+              </div>
             </div>
           </div>
           <div class="flex flex-wrap gap-2 mb-4">
-            <button @click="ciQueryBuild" :disabled="ciLoading || !jenkinsBuildUrl.trim()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm disabled:opacity-40">查询 Build</button>
-            <button @click="ciOpenRebuildDialog" :disabled="!jenkinsBuildUrl.trim()" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-sm font-medium disabled:opacity-40">Rebuild</button>
-            <button @click="window.open(jenkinsBuildUrl, '_blank')" :disabled="!jenkinsBuildUrl.trim()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm disabled:opacity-40">打开 Build 页面</button>
+            <button @click="ciQueryBuild" :disabled="ciLoading || !jenkinsQueryNum.trim()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm disabled:opacity-40">查询 Build</button>
+            <button @click="ciOpenRebuildDialog" :disabled="!jenkinsQueryNum.trim()" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-sm font-medium disabled:opacity-40">Rebuild</button>
+            <button @click="ciOpenBuildPage" :disabled="!jenkinsQueryNum.trim()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm disabled:opacity-40">打开 Build 页面</button>
           </div>
           <div v-if="ciLoading" class="text-center py-6 text-gray-500"><span class="spinner"></span> 查询中...</div>
           <div v-if="ciBuildDetail" class="bg-gray-900 border border-gray-800 rounded-xl p-4 text-sm space-y-2">
@@ -678,6 +783,13 @@
               </span>
             </div>
             <div class="flex items-center gap-2 text-gray-400"><span class="w-16 shrink-0">URL</span><span class="text-gray-300 font-mono text-xs break-all">{{ ciBuildDetail.url }}</span></div>
+            <div v-if="ciBuildDetail.parameters && ciBuildDetail.parameters.length" class="border-t border-gray-800 pt-2 mt-2">
+              <div class="text-xs text-gray-500 mb-1.5">Build Parameters</div>
+              <div v-for="p in ciBuildDetail.parameters" :key="p.name" class="flex gap-2 py-0.5 text-xs">
+                <span class="text-gray-400 shrink-0 w-44 truncate text-right" :title="p.name">{{ p.name }}</span>
+                <span class="text-gray-200 break-all">{{ p.value }}</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -753,24 +865,84 @@
               <button @click="ciSearchGerrit(1)" :disabled="ciLoading" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm disabled:opacity-40 shrink-0">
                 <span v-if="ciLoading" class="spinner mr-1"></span>查询提交
               </button>
+              <button @click="ciClearGerrit" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs text-gray-400 border border-gray-700 shrink-0">清除结果</button>
               <span class="text-xs text-gray-500 font-mono truncate">{{ buildGerritQueryPreview }}</span>
             </div>
           </div>
           <div v-if="ciGerritResults.length === 0 && ciGerritSearched && !ciLoading" class="text-center py-8 text-gray-500">未找到匹配的变更</div>
           <div v-else class="space-y-2">
-            <div v-for="ch in ciGerritResults" :key="ch.number" class="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4">
+            <div v-for="ch in ciGerritResults" :key="ch.number"
+                 @click="ciShowGerritDetail(ch)"
+                 class="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 cursor-pointer hover:border-gray-600 transition-colors">
               <div class="flex items-center justify-between mb-1">
                 <div class="flex items-center gap-2 min-w-0">
                   <span :class="['px-1.5 py-0.5 text-[10px] rounded font-medium shrink-0', gerritStatusClass(ch.status)]">{{ ch.status }}</span>
                   <span class="text-sm font-medium truncate">{{ ch.subject }}</span>
                 </div>
-                <a :href="ch.url" target="_blank" class="text-xs text-brand-400 hover:text-brand-300 shrink-0 ml-2">#{{ ch.number }}</a>
+                <a :href="ch.url" target="_blank" @click.stop class="text-xs text-brand-400 hover:text-brand-300 shrink-0 ml-2">#{{ ch.number }}</a>
               </div>
               <div class="text-xs text-gray-500 flex flex-wrap gap-x-3 gap-y-0.5">
                 <span>{{ ch.project }}</span>
                 <span>{{ ch.branch }}</span>
                 <span>{{ ch.owner }}</span>
                 <span>{{ ch.updated }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Gerrit Detail Dialog -->
+          <div v-if="ciGerritDetail.show" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="ciGerritDetail.show = false">
+            <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-2xl p-5 md:p-6 max-h-[85vh] overflow-y-auto">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold">Gerrit 提交详情</h3>
+                <button @click="ciGerritDetail.show = false" class="text-gray-500 hover:text-gray-300 text-xl">&times;</button>
+              </div>
+
+              <div v-if="ciGerritDetail.loading" class="text-center py-12 text-gray-500"><span class="spinner"></span> 加载中...</div>
+              <div v-else-if="ciGerritDetail.data">
+                <div class="grid grid-cols-2 gap-2 text-sm mb-4">
+                  <div class="flex gap-2 text-gray-400"><span class="w-16 shrink-0">编号</span><span class="text-gray-200">{{ ciGerritDetail.data.number }}</span></div>
+                  <div class="flex gap-2 text-gray-400"><span class="w-16 shrink-0">状态</span><span :class="gerritStatusClass(ciGerritDetail.data.status)" class="px-1.5 py-0.5 rounded text-[10px] font-medium">{{ ciGerritDetail.data.status }}</span></div>
+                  <div class="flex gap-2 text-gray-400 col-span-2"><span class="w-16 shrink-0">项目</span><span class="text-gray-200 font-mono text-xs">{{ ciGerritDetail.data.project }}</span></div>
+                  <div class="flex gap-2 text-gray-400"><span class="w-16 shrink-0">分支</span><span class="text-gray-200">{{ ciGerritDetail.data.branch }}</span></div>
+                  <div class="flex gap-2 text-gray-400"><span class="w-16 shrink-0">作者</span><span class="text-gray-200">{{ ciGerritDetail.data.owner }}</span></div>
+                  <div class="flex gap-2 text-gray-400"><span class="w-16 shrink-0">增删</span><span><span class="text-emerald-400">+{{ ciGerritDetail.data.insertions }}</span> <span class="text-red-400">-{{ ciGerritDetail.data.deletions }}</span></span></div>
+                  <div class="flex gap-2 text-gray-400"><span class="w-16 shrink-0">更新</span><span class="text-gray-300">{{ ciGerritDetail.data.updated }}</span></div>
+                </div>
+
+                <div v-if="ciGerritDetail.data.labels && ciGerritDetail.data.labels.length" class="mb-3">
+                  <div class="text-xs text-gray-400 mb-1.5 font-medium">投票</div>
+                  <div class="flex flex-wrap gap-1.5">
+                    <span v-for="l in ciGerritDetail.data.labels" :key="l" class="px-2 py-0.5 bg-gray-800 border border-gray-700 rounded-md text-xs text-gray-300">{{ l }}</span>
+                  </div>
+                </div>
+
+                <div v-if="ciGerritDetail.data.commit_message" class="mb-3">
+                  <div class="text-xs text-gray-400 mb-1.5 font-medium">提交信息</div>
+                  <pre class="text-xs text-gray-300 bg-gray-800 rounded-lg p-3 max-h-40 overflow-y-auto whitespace-pre-wrap break-all">{{ ciGerritDetail.data.commit_message }}</pre>
+                </div>
+
+                <div v-if="ciGerritDetail.data.files && ciGerritDetail.data.files.length" class="mb-3">
+                  <div class="text-xs text-gray-400 mb-1.5 font-medium">变更文件 ({{ ciGerritDetail.data.files.length }})</div>
+                  <div class="bg-gray-800 rounded-lg overflow-hidden max-h-48 overflow-y-auto">
+                    <div v-for="f in ciGerritDetail.data.files" :key="f.path" class="flex items-center justify-between px-3 py-1.5 text-xs border-b border-gray-700/50 last:border-0">
+                      <span class="font-mono text-gray-300 truncate mr-2" :title="f.path">{{ f.path }}</span>
+                      <span class="shrink-0"><span class="text-emerald-400">+{{ f.lines_inserted }}</span> <span class="text-red-400">-{{ f.lines_deleted }}</span></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="ciGerritDetail.data.reviewers && ciGerritDetail.data.reviewers.length" class="mb-3">
+                  <div class="text-xs text-gray-400 mb-1.5 font-medium">审查者</div>
+                  <div class="flex flex-wrap gap-1.5">
+                    <span v-for="r in ciGerritDetail.data.reviewers" :key="r" class="px-2 py-0.5 bg-gray-800 border border-gray-700 rounded-md text-xs text-gray-400">{{ r }}</span>
+                  </div>
+                </div>
+
+                <div class="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-800">
+                  <button @click="ciGerritDetail.show = false" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm">关闭</button>
+                  <a :href="ciGerritDetail.data.url" target="_blank" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm font-medium inline-block">在浏览器中打开</a>
+                </div>
               </div>
             </div>
           </div>
@@ -991,7 +1163,7 @@ createApp({
       apiUrl: localStorage.getItem('mdc_api_url') || 'https://my-device-control-web.pages.dev/api',
       apiKey: localStorage.getItem('mdc_api_key') || '',
       pollInterval: parseInt(localStorage.getItem('mdc_poll_interval') || '5'),
-      refreshInterval: parseInt(localStorage.getItem('mdc_refresh_interval') || '10')
+      refreshInterval: parseInt(localStorage.getItem('mdc_refresh_interval') || '30')
     })
 
     // Terminal state (xterm.js)
@@ -1017,8 +1189,32 @@ createApp({
     // CI Tools state
     const ciTab = ref('jenkins')
     const ciLoading = ref(false)
+    // Jenkins Server / Job / Build with Parameters
+    const jenkinsSelectedServer = ref('')
+    const jenkinsServerList = ref([])
+    const jenkinsJobList = ref([])
+    const jenkinsBuildNum = ref('')
+    const jenkinsJobDetail = ref(null)
+    const jenkinsParamValues = reactive({})
+    const jenkinsUserFilter = ref('')
+    const jenkinsUserBuilds = ref([])
+    const ciUserBuildsLoading = ref(false)
     // Jenkins Rebuild
-    const jenkinsBuildUrl = ref('')
+    const jenkinsQueryNum = ref('')
+
+    function getSelectedServerUrl() {
+      const s = jenkinsServerList.value.find(x => x.id === jenkinsSelectedServer.value)
+      return s ? (s.url || '').replace(/\/+$/, '') : ''
+    }
+    function buildJenkinsUrl(num) {
+      const base = getSelectedServerUrl()
+      if (!base || !String(num || '').trim()) return ''
+      return `${base}/${String(num).trim()}/`
+    }
+    function extractBuildNum(url) {
+      const m = String(url || '').match(/\/(\d+)\/?$/)
+      return m ? m[1] : ''
+    }
     const ciBuildDetail = ref(null)
     const rebuildDialog = reactive({
       show: false,
@@ -1038,6 +1234,7 @@ createApp({
     const gerritHasMore = ref(false)
     const ciGerritResults = ref([])
     const ciGerritSearched = ref(false)
+    const ciGerritDetail = reactive({ show: false, loading: false, data: null })
 
     const navItems = [
       { id: 'dashboard', icon: '📊', label: '仪表板' },
@@ -1190,15 +1387,17 @@ createApp({
     }
 
     async function syncFromDesktop() {
-      if (!desktopOnline.value) {
-        toast('桌面端不在线，无法同步', 'error')
-        return
-      }
       syncingDesktop.value = true
       try {
-        await sendAndWaitCommand('sync-workspaces', {}, 30)
-        await fetchWorkspaces()
-        toast('已从桌面端同步工作区数据')
+        if (desktopOnline.value) {
+          await sendAndWaitCommand('sync-workspaces', {}, 30)
+          await fetchWorkspaces()
+          toast('已从桌面端同步工作区数据')
+        } else {
+          await fetchWorkspaces()
+          const count = workspaces.value.length
+          toast(count > 0 ? `已刷新缓存 (共 ${count} 个工作区，桌面端离线)` : '桌面端离线，暂无缓存数据', count > 0 ? 'success' : 'error')
+        }
       } catch (e) {
         toast('同步失败: ' + e.message, 'error')
       } finally {
@@ -1452,7 +1651,7 @@ createApp({
         settings.apiUrl = 'https://my-device-control-web.pages.dev/api'
         settings.apiKey = ''
         settings.pollInterval = 5
-        settings.refreshInterval = 10
+        settings.refreshInterval = 30
         toast('本地缓存已清除')
       }
       confirmDialog.show = true
@@ -1637,12 +1836,189 @@ createApp({
     }
 
     // ===== CI Tools - Jenkins =====
+    function ensureDesktopOnline() {
+      if (!desktopOnline.value) {
+        toast('桌面端离线，无法执行此操作', 'error')
+        return false
+      }
+      return true
+    }
+
+    function ciFormatTs(ts) {
+      if (!ts) return '-'
+      const d = new Date(ts)
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+    }
+
+    async function ciSearchBuildsByUser() {
+      const user = jenkinsUserFilter.value.trim()
+      if (!user) { toast('请输入用户名', 'error'); return }
+      if (!getSelectedServerUrl()) { toast('请先选择 Jenkins 服务器', 'error'); return }
+      if (!ensureDesktopOnline()) return
+      ciUserBuildsLoading.value = true
+      ciLoading.value = true
+      try {
+        const result = await sendAndWaitCommand('jenkins-build-history', {
+          server_id: jenkinsSelectedServer.value,
+          job_url: getSelectedServerUrl(),
+          limit: 200
+        })
+        if (result && result.result) {
+          const all = JSON.parse(result.result)
+          jenkinsUserBuilds.value = all.filter(b => b.display_name && b.display_name.toLowerCase().includes(user.toLowerCase()))
+          if (!jenkinsUserBuilds.value.length) toast('未找到匹配的构建记录')
+        }
+      } catch (e) {
+        toast(String(e), 'error')
+      } finally {
+        ciUserBuildsLoading.value = false
+        ciLoading.value = false
+      }
+    }
+
+    function ciClearJenkins() {
+      jenkinsJobDetail.value = null
+      Object.keys(jenkinsParamValues).forEach(k => delete jenkinsParamValues[k])
+      ciBuildDetail.value = null
+      jenkinsUserBuilds.value = []
+      jenkinsJobList.value = []
+    }
+
+    function ciClearGerrit() {
+      ciGerritResults.value = []
+      ciGerritSearched.value = false
+      ciGerritDetail.show = false
+      ciGerritDetail.data = null
+    }
+
+    async function ciRefreshConfig() {
+      if (!ensureDesktopOnline()) return
+      ciLoading.value = true
+      try {
+        const result = await sendAndWaitCommand('jenkins-list-jobs', {
+          server_id: jenkinsSelectedServer.value || undefined
+        }, 60)
+        const data = JSON.parse(result)
+        if (data.servers) jenkinsServerList.value = data.servers
+        toast('已刷新 Jenkins 配置')
+      } catch (e) {
+        toast('刷新配置失败: ' + e.message, 'error')
+      } finally {
+        ciLoading.value = false
+      }
+    }
+
+    async function ciTestJenkins() {
+      if (!ensureDesktopOnline()) return
+      ciLoading.value = true
+      try {
+        const result = await sendAndWaitCommand('jenkins-test-connection', {
+          server_id: jenkinsSelectedServer.value || undefined
+        }, 60)
+        const data = JSON.parse(result)
+        toast(data.message || '连接成功')
+      } catch (e) {
+        toast('测试连接失败: ' + e.message, 'error')
+      } finally {
+        ciLoading.value = false
+      }
+    }
+
+    async function ciLoadJobs() {
+      if (!ensureDesktopOnline()) return
+      ciLoading.value = true
+      try {
+        const result = await sendAndWaitCommand('jenkins-list-jobs', {
+          server_id: jenkinsSelectedServer.value || undefined
+        }, 60)
+        const data = JSON.parse(result)
+        jenkinsJobList.value = data.jobs || []
+        if (data.servers) jenkinsServerList.value = data.servers
+        toast(`已加载 ${jenkinsJobList.value.length} 个作业`)
+      } catch (e) {
+        toast('加载作业失败: ' + e.message, 'error')
+      } finally {
+        ciLoading.value = false
+      }
+    }
+
+    async function ciLoadJobDetail() {
+      const url = buildJenkinsUrl(jenkinsBuildNum.value)
+      if (!url) { toast('请先选择服务器并输入 Build 编号', 'error'); return }
+      if (!ensureDesktopOnline()) return
+      ciLoading.value = true
+      jenkinsJobDetail.value = null
+      Object.keys(jenkinsParamValues).forEach(k => delete jenkinsParamValues[k])
+      try {
+        const result = await sendAndWaitCommand('jenkins-job-detail', {
+          job_url: url,
+          server_id: jenkinsSelectedServer.value || undefined
+        }, 60)
+        const data = JSON.parse(result)
+        jenkinsJobDetail.value = data
+        if (data.parameters) {
+          data.parameters.forEach(p => {
+            jenkinsParamValues[p.name] = p.default_value || ''
+          })
+        }
+        if (data.last_build_url) {
+          jenkinsQueryNum.value = extractBuildNum(data.last_build_url)
+        }
+        toast('已读取 Job 详情')
+      } catch (e) {
+        toast('读取 Job 详情失败: ' + e.message, 'error')
+      } finally {
+        ciLoading.value = false
+      }
+    }
+
+    async function ciTriggerBuild() {
+      if (!getSelectedServerUrl()) { toast('请先选择 Jenkins 服务器', 'error'); return }
+      if (!ensureDesktopOnline()) return
+      ciLoading.value = true
+      try {
+        const params = {}
+        for (const [k, v] of Object.entries(jenkinsParamValues)) {
+          if (v !== undefined && v !== '') params[k] = v
+        }
+        const jobUrl = jenkinsJobDetail.value?.url || (getSelectedServerUrl() + '/')
+        const result = await sendAndWaitCommand('jenkins-trigger-build', {
+          job_url: jobUrl,
+          server_id: jenkinsSelectedServer.value || undefined,
+          parameters: params
+        }, 60)
+        const data = JSON.parse(result)
+        if (data.build_url) jenkinsQueryNum.value = extractBuildNum(data.build_url)
+        else if (data.build_number) jenkinsQueryNum.value = String(data.build_number)
+        toast(data.message || '已触发构建')
+      } catch (e) {
+        toast('触发构建失败: ' + e.message, 'error')
+      } finally {
+        ciLoading.value = false
+      }
+    }
+
+    function ciOpenBuildPage() {
+      const url = buildJenkinsUrl(jenkinsQueryNum.value)
+      if (!url) return
+      const a = document.createElement('a')
+      a.href = url
+      a.target = '_blank'
+      a.rel = 'noopener'
+      a.click()
+    }
+
     async function ciQueryBuild() {
-      if (!jenkinsBuildUrl.value.trim()) return
+      const url = buildJenkinsUrl(jenkinsQueryNum.value)
+      if (!url) { toast('请先选择服务器并输入 Build 编号', 'error'); return }
+      if (!ensureDesktopOnline()) return
       ciLoading.value = true
       ciBuildDetail.value = null
       try {
-        const result = await sendAndWaitCommand('jenkins-build-detail', { build_url: jenkinsBuildUrl.value })
+        const result = await sendAndWaitCommand('jenkins-build-detail', {
+          build_url: url,
+          server_id: jenkinsSelectedServer.value || undefined
+        }, 60)
         ciBuildDetail.value = JSON.parse(result)
         toast('已读取 Build 详情')
       } catch (e) {
@@ -1653,8 +2029,9 @@ createApp({
     }
 
     function ciOpenRebuildDialog() {
-      if (!jenkinsBuildUrl.value.trim()) return
-      rebuildDialog.buildUrl = jenkinsBuildUrl.value.trim()
+      const url = buildJenkinsUrl(jenkinsQueryNum.value)
+      if (!url) return
+      rebuildDialog.buildUrl = url
       rebuildDialog.overrideEnabled = false
       rebuildDialog.overrides = { GERRITID_QSSI: '', GERRITID_VENDOR: '', GERRITID_LE: '', GERRITID_MDEP: '' }
       rebuildDialog.show = true
@@ -1673,7 +2050,8 @@ createApp({
         if (Object.keys(overrides).length > 0) params.parameter_overrides = overrides
         const result = await sendAndWaitCommand('jenkins-rebuild', params)
         const data = JSON.parse(result)
-        if (data.build_url) jenkinsBuildUrl.value = data.build_url
+        if (data.build_url) jenkinsQueryNum.value = extractBuildNum(data.build_url)
+        else if (data.build_number) jenkinsQueryNum.value = String(data.build_number)
         rebuildDialog.show = false
         toast(data.message || '已触发 Rebuild')
       } catch (e) {
@@ -1697,6 +2075,23 @@ createApp({
       if (gerritKeyword.value.trim()) parts.push(gerritKeyword.value.trim())
       return parts.join(' ')
     })
+
+    async function ciShowGerritDetail(ch) {
+      if (!ch?.number) return
+      if (!ensureDesktopOnline()) return
+      ciGerritDetail.show = true
+      ciGerritDetail.loading = true
+      ciGerritDetail.data = null
+      try {
+        const result = await sendAndWaitCommand('gerrit-change-detail', { change_number: ch.number }, 30)
+        ciGerritDetail.data = JSON.parse(result)
+      } catch (e) {
+        toast('获取 Gerrit 详情失败: ' + e.message, 'error')
+        ciGerritDetail.show = false
+      } finally {
+        ciGerritDetail.loading = false
+      }
+    }
 
     async function ciSearchGerrit(page) {
       page = page || 1
@@ -1796,6 +2191,18 @@ createApp({
     const TIMEOUT_PENDING_MS = 5 * 60 * 1000
     const TIMEOUT_RUNNING_MS = 30 * 60 * 1000
 
+    const IDLE_THRESHOLD_MS = 60 * 1000
+    let lastActivityTime = Date.now()
+    const isIdle = ref(false)
+
+    function trackUserActivity() {
+      lastActivityTime = Date.now()
+      if (isIdle.value) {
+        isIdle.value = false
+        startAutoRefresh()
+      }
+    }
+
     async function autoTimeoutCommands() {
       const now = Date.now()
       for (const cmd of commands.value) {
@@ -1817,13 +2224,24 @@ createApp({
       stopAutoRefresh()
       refreshCountdown.value = settings.refreshInterval
       countdownTimer = setInterval(() => {
+        if (Date.now() - lastActivityTime > IDLE_THRESHOLD_MS) {
+          if (!isIdle.value) {
+            isIdle.value = true
+            stopAutoRefresh()
+          }
+          return
+        }
         refreshCountdown.value--
         if (refreshCountdown.value <= 0) {
           refreshCountdown.value = settings.refreshInterval
         }
       }, 1000)
       refreshTimer = setInterval(() => {
-        fetchCommands().then(() => autoTimeoutCommands())
+        if (isIdle.value) return
+        const page = currentPage.value
+        if (page === 'dashboard' || page === 'history') {
+          fetchCommands().then(() => autoTimeoutCommands())
+        }
         checkHeartbeat()
         refreshCountdown.value = settings.refreshInterval
       }, settings.refreshInterval * 1000)
@@ -1855,10 +2273,19 @@ createApp({
       fetchWorkspaces()
       fetchCommands()
       startAutoRefresh()
+
+      document.addEventListener('click', trackUserActivity)
+      document.addEventListener('keydown', trackUserActivity)
+      document.addEventListener('touchstart', trackUserActivity)
+      document.addEventListener('scroll', trackUserActivity, true)
     })
 
     onUnmounted(() => {
       stopAutoRefresh()
+      document.removeEventListener('click', trackUserActivity)
+      document.removeEventListener('keydown', trackUserActivity)
+      document.removeEventListener('touchstart', trackUserActivity)
+      document.removeEventListener('scroll', trackUserActivity, true)
     })
 
     watch(currentPage, (newPage, oldPage) => {
@@ -1875,7 +2302,7 @@ createApp({
     return {
       currentPage, connected, desktopOnline, heartbeatData, sending, toasts,
       commands, workspaces, selectedWorkspace, expandedCmd,
-      historyFilter, historySearch, refreshCountdown, showApiKey,
+      historyFilter, historySearch, refreshCountdown, isIdle, trackUserActivity, showApiKey,
       connectionTestResult, workspaceSyncInfo,
       showBuildDialog, showCherryDialog, showCustomDialog, showJenkinsDialog, showAddWorkspace,
       buildScript, cherryIds, customCommand, jenkinsRef,
@@ -1890,13 +2317,20 @@ createApp({
       fbDeviceId, fbCurrentPath, fbPathInput, fbFiles, fbLoading,
       fbPathSegments, fbNavigate, fbRefresh, formatFileSize,
       // CI Tools - Jenkins
-      ciTab, ciLoading, jenkinsBuildUrl, ciBuildDetail, rebuildDialog,
-      ciQueryBuild, ciOpenRebuildDialog, ciRebuild,
+      ciTab, ciLoading, jenkinsBuildNum, jenkinsQueryNum, ciBuildDetail, rebuildDialog,
+      jenkinsSelectedServer, jenkinsServerList, jenkinsJobList,
+      jenkinsJobDetail, jenkinsParamValues,
+      jenkinsUserFilter, jenkinsUserBuilds, ciUserBuildsLoading,
+      getSelectedServerUrl, buildJenkinsUrl, extractBuildNum,
+      ciRefreshConfig, ciTestJenkins, ciLoadJobs, ciLoadJobDetail, ciTriggerBuild,
+      ciQueryBuild, ciOpenRebuildDialog, ciRebuild, ciOpenBuildPage,
+      ciSearchBuildsByUser, ciClearJenkins, ciFormatTs,
       // CI Tools - Gerrit
       gerritStatus, gerritExcludeWip, gerritBranch, gerritBranches,
       gerritOwner, gerritKeyword, gerritPageSize, gerritPage, gerritHasMore,
-      ciGerritResults, ciGerritSearched, buildGerritQueryPreview,
-      ciSearchGerrit, gerritStatusClass, autoFillOwnerSuffix,
+      ciGerritResults, ciGerritSearched, ciGerritDetail, buildGerritQueryPreview,
+      ciSearchGerrit, ciShowGerritDetail, gerritStatusClass, autoFillOwnerSuffix,
+      ciClearGerrit,
       // Existing
       toast, checkHeartbeat, executeAction, batchAction,
       submitBuild, submitCherry, submitCustom, submitJenkins,
