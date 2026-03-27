@@ -720,7 +720,7 @@
                 <div v-for="b in jenkinsUserBuilds" :key="b.number" @click="jenkinsBuildNum = String(b.number)"
                      class="flex items-center gap-2 px-3 py-2 border-b border-gray-800/50 hover:bg-gray-800/50 cursor-pointer text-xs">
                   <span class="text-brand-400 font-mono w-14 shrink-0">#{{ b.number }}</span>
-                  <span class="flex-1 text-gray-300 truncate">{{ b.display_name }}</span>
+                  <span class="flex-1 text-gray-300 truncate">{{ b.description || b.display_name }}</span>
                   <span :class="b.result === 'SUCCESS' ? 'text-emerald-400' : b.result === 'FAILURE' ? 'text-red-400' : 'text-yellow-400'" class="shrink-0 w-16 text-right">
                     {{ b.result || '进行中' }}
                   </span>
@@ -1865,7 +1865,12 @@ createApp({
         })
         if (result && result.result) {
           const all = JSON.parse(result.result)
-          jenkinsUserBuilds.value = all.filter(b => b.display_name && b.display_name.toLowerCase().includes(user.toLowerCase()))
+          const lc = user.toLowerCase()
+          jenkinsUserBuilds.value = all.filter(b => {
+            const dn = (b.display_name || '').toLowerCase()
+            const desc = (b.description || '').toLowerCase()
+            return dn.includes(lc) || desc.includes(lc)
+          })
           if (!jenkinsUserBuilds.value.length) toast('未找到匹配的构建记录')
         }
       } catch (e) {
