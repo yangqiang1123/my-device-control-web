@@ -1,6 +1,10 @@
 // POST /api/commands - Create a new command
 // GET  /api/commands - List commands (query: ?status=pending&limit=50)
-// GET  /api/commands?poll=true - Long-poll for pending commands (for Tauri app)
+// GET  /api/commands?poll=true - Poll for pending commands (for Tauri app)
+
+function getBucket(ts) {
+  return Math.floor(ts / 5000);
+}
 
 export async function onRequestPost(context) {
   const { request, env } = context;
@@ -29,20 +33,23 @@ export async function onRequestPost(context) {
       updated_at: new Date().toISOString(),
     };
 
-    // Store individual command (TTL: 7 days)
     await KV.put(`command:${id}`, JSON.stringify(command), { expirationTtl: 604800 });
 
-    // Add to command list index
     const index = JSON.parse(await KV.get('command_index') || '[]');
     index.unshift(id);
-    // Keep only last 200 entries
     if (index.length > 200) index.length = 200;
     await KV.put('command_index', JSON.stringify(index));
 
-    // Add to pending queue
-    const pending = JSON.parse(await KV.get('pending_queue') || '[]');
-    pending.push(id);
-    await KV.put('pending_queue', JSON.stringify(pending));
+    // Write to time-bucketed pending keys (5-second buckets).
+    // Write to current + 2 future buckets so the desktop always hits
+    // at least one fresh (uncached) bucket key on its next poll.
+    const bucket = getBucket(Date.now());
+    for (let offset = 0; offset <= 2; offset++) {
+      const bk = `pending_b:${bucket + offset}`;
+      const bd = JSON.parse(await KV.get(bk) || '[]');
+      if (!bd.includes(id)) bd.push(id);
+      await KV.put(bk, JSON.stringify(bd), { expirationTtl: 300 });
+    }
 
     return jsonResponse({ ok: true, command });
   } catch (e) {
@@ -60,15 +67,35 @@ export async function onRequestGet(context) {
   const poll = url.searchParams.get('poll') === 'true';
 
   try {
-    // Poll mode: return pending commands and clear them
     if (poll) {
-      const pending = JSON.parse(await KV.get('pending_queue') || '[]');
-      if (pending.length === 0) {
-        return jsonResponse({ commands: [] });
+      const now = Date.now();
+      const currentBucket = getBucket(now);
+      const bucketsToCheck = [];
+      for (let i = 0; i <= 23; i++) bucketsToCheck.push(currentBucket - i);
+      const seen = new Set();
+      const commands = [];
+
+      for (const b of bucketsToCheck) {
+        const ids = JSON.parse(await KV.get(`pending_b:${b}`) || '[]');
+        for (const id of ids) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+          const data = await KV.get(`command:${id}`);
+          if (data) {
+            const cmd = JSON.parse(data);
+            if (cmd.status === 'pending') {
+              commands.push(cmd);
+            }
+          }
+        }
       }
 
-      const commands = [];
-      for (const id of pending) {
+      // Fallback: scan command_index for pending commands missed by time buckets
+      // (e.g. when desktop restarts and bucket keys have expired)
+      const index = JSON.parse(await KV.get('command_index') || '[]');
+      for (const id of index.slice(0, 30)) {
+        if (seen.has(id)) continue;
+        seen.add(id);
         const data = await KV.get(`command:${id}`);
         if (data) {
           const cmd = JSON.parse(data);
@@ -77,9 +104,6 @@ export async function onRequestGet(context) {
           }
         }
       }
-
-      // Clear the pending queue (Tauri app has received them)
-      await KV.put('pending_queue', '[]');
 
       return jsonResponse({ commands });
     }
