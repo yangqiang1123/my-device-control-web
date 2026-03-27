@@ -714,7 +714,7 @@
             <div v-if="jenkinsUserBuilds.length" class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
               <div class="flex items-center justify-between px-3 py-2 border-b border-gray-800">
                 <span class="text-xs text-gray-400 font-medium">构建历史（{{ jenkinsUserBuilds.length }} 条）</span>
-                <button @click="jenkinsUserBuilds.length = 0" class="text-xs text-gray-500 hover:text-gray-300">关闭</button>
+                <button @click="jenkinsUserBuilds.splice(0)" class="text-xs text-gray-500 hover:text-gray-300">关闭</button>
               </div>
               <div class="max-h-64 overflow-y-auto">
                 <div v-for="b in jenkinsUserBuilds" :key="b.number" @click="jenkinsBuildNum = String(b.number)"
@@ -1896,18 +1896,29 @@ createApp({
       ciGerritDetail.data = null
     }
 
+    function loadCachedJenkinsServers() {
+      try {
+        const cached = localStorage.getItem('mdc_jenkins_servers')
+        if (cached) jenkinsServerList.value = JSON.parse(cached)
+      } catch {}
+    }
+
     async function ciRefreshConfig() {
       if (!ensureDesktopOnline()) return
       ciLoading.value = true
       try {
         const result = await sendAndWaitCommand('jenkins-list-jobs', {
           server_id: jenkinsSelectedServer.value || undefined
-        }, 60)
+        }, 30)
         const data = JSON.parse(result)
-        if (data.servers) jenkinsServerList.value = data.servers
+        if (data.servers) {
+          jenkinsServerList.value = data.servers
+          localStorage.setItem('mdc_jenkins_servers', JSON.stringify(data.servers))
+        }
+        if (data.jobs) jenkinsJobList.value = data.jobs
         toast('已刷新 Jenkins 配置')
       } catch (e) {
-        toast('刷新配置失败: ' + e.message, 'error')
+        toast('刷新配置失败: ' + e.message + '（请确认桌面端应用已运行且 Web 触发器已启用）', 'error')
       } finally {
         ciLoading.value = false
       }
@@ -2277,6 +2288,7 @@ createApp({
       checkHeartbeat()
       fetchWorkspaces()
       fetchCommands()
+      loadCachedJenkinsServers()
       startAutoRefresh()
 
       document.addEventListener('click', trackUserActivity)
