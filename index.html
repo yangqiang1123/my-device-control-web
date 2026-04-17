@@ -24,6 +24,7 @@
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    input::placeholder, textarea::placeholder { color: #4b5563 !important; opacity: 1; }
     .cmd-detail-enter-active, .cmd-detail-leave-active { transition: all 0.2s ease; overflow: hidden; }
     .cmd-detail-enter-from, .cmd-detail-leave-to { max-height: 0; opacity: 0; }
     .cmd-detail-enter-to, .cmd-detail-leave-from { max-height: 500px; opacity: 1; }
@@ -284,8 +285,9 @@
         <div class="flex items-center justify-between mb-4 md:mb-6">
           <h2 class="text-lg md:text-xl font-bold">命令历史</h2>
           <div class="flex items-center gap-2 md:gap-3">
-            <span class="text-[10px] md:text-xs text-gray-500">{{ refreshCountdown }}s</span>
-            <button @click="fetchCommands(true)" class="text-xs md:text-sm text-brand-500 hover:text-brand-400 flex items-center gap-1">
+            <span v-if="isIdle" class="text-[10px] md:text-xs text-yellow-500">已暂停（点击任意处恢复）</span>
+            <span v-else class="text-[10px] md:text-xs text-gray-500">{{ refreshCountdown }}s</span>
+            <button @click="fetchCommands(true); trackUserActivity()" class="text-xs md:text-sm text-brand-500 hover:text-brand-400 flex items-center gap-1">
               🔄 <span class="hidden sm:inline">刷新</span>
             </button>
           </div>
@@ -313,8 +315,8 @@
           <div>{{ historyFilter || historySearch ? '没有匹配的命令' : '暂无命令记录' }}</div>
         </div>
 
-        <div v-else class="space-y-3">
-          <div v-for="cmd in filteredCommands" :key="cmd.id"
+        <div v-else class="space-y-3" style="max-height: 70vh; overflow-y: auto;">
+          <div v-for="cmd in filteredCommands.slice(0, historyPageSize)" :key="cmd.id"
                class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden transition-all"
                :class="expandedCmd === cmd.id ? 'border-gray-700' : ''">
             <!-- Command Header -->
@@ -392,6 +394,11 @@
               </div>
             </div>
           </div>
+          <div v-if="filteredCommands.length > historyPageSize" class="text-center py-3">
+            <button @click="historyPageSize += 50" class="px-4 py-2 bg-gray-800 border border-gray-700 hover:border-brand-500 rounded-lg text-sm text-gray-300 transition-colors">
+              加载更多 (已显示 {{ Math.min(historyPageSize, filteredCommands.length) }} / {{ filteredCommands.length }})
+            </button>
+          </div>
         </div>
       </div>
 
@@ -437,6 +444,9 @@
               <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2">
                 <button @click="selectAndOperate(ws)" class="p-1.5 rounded-md hover:bg-brand-500/10 text-brand-400 text-xs transition-colors" title="操作">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                </button>
+                <button @click="openEditWs(ws)" class="p-1.5 rounded-md hover:bg-blue-500/10 text-gray-500 hover:text-blue-400 text-xs transition-colors" title="编辑">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                 </button>
                 <button @click="deleteWorkspace(ws.id)" class="p-1.5 rounded-md hover:bg-red-500/10 text-gray-500 hover:text-red-400 text-xs transition-colors" title="删除">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
@@ -625,10 +635,35 @@
           <div class="flex-1"></div>
           <button @click="fbRefresh" :disabled="fbLoading" class="text-gray-500 hover:text-gray-300 shrink-0">🔄</button>
         </div>
-        <!-- Path Input -->
+        <!-- Path Input + Actions -->
         <div class="flex gap-2 mb-3">
           <input v-model="fbPathInput" @keydown.enter="fbNavigate(fbPathInput)" class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-brand-500" placeholder="输入路径..." />
           <button @click="fbNavigate(fbPathInput)" :disabled="fbLoading || !fbDeviceId" class="px-3 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm disabled:opacity-40">前往</button>
+          <button @click="fbShowCreateDir" :disabled="!fbDeviceId" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs shrink-0 disabled:opacity-40">📁+ 新建文件夹</button>
+          <button @click="fbShowCreateFile" :disabled="!fbDeviceId" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs shrink-0 disabled:opacity-40">📄+ 新建文件</button>
+          <button @click="fbShowHidden = !fbShowHidden" class="px-3 py-2 rounded-lg text-xs shrink-0" :class="fbShowHidden ? 'bg-brand-600 hover:bg-brand-700' : 'bg-gray-700 hover:bg-gray-600'">{{ fbShowHidden ? '👁 隐藏文件' : '👁‍🗨 隐藏文件' }}</button>
+        </div>
+        <!-- File Search -->
+        <div class="flex gap-2 mb-3">
+          <input v-model="fbSearchKeyword" @keydown.enter="fbSearchFiles" class="flex-1 bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-brand-500" placeholder="模糊搜索文件名..." />
+          <button @click="fbSearchFiles" :disabled="fbSearching || !fbDeviceId || !fbSearchKeyword.trim()" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm disabled:opacity-40 shrink-0">
+            <span v-if="fbSearching" class="spinner-sm"></span> 搜索
+          </button>
+          <button v-if="fbSearchResults.length > 0" @click="fbClearSearch" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs shrink-0">清除结果</button>
+        </div>
+        <!-- Search Results -->
+        <div v-if="fbSearchResults.length > 0" class="bg-gray-900 border border-purple-800/50 rounded-xl overflow-hidden mb-3">
+          <div class="px-3 py-2 bg-purple-900/20 border-b border-purple-800/50 text-sm font-medium text-purple-300">
+            搜索结果 ({{ fbSearchTotal }} 个匹配)
+          </div>
+          <div v-for="(f, idx) in fbSearchResults" :key="f.path"
+               @click="fbNavigateToSearchResult(f.path)"
+               class="flex items-center gap-2 px-3 py-2 border-b border-gray-800/50 hover:bg-gray-800/50 cursor-pointer text-xs md:text-sm transition-colors"
+               style="content-visibility: auto; contain-intrinsic-size: auto 36px;">
+            <span class="text-gray-500 w-6 text-right shrink-0">{{ idx + 1 }}.</span>
+            <span class="text-brand-400 font-mono truncate">{{ f.path }}</span>
+            <button @click.stop="fbPreviewSearchResult(f.path)" class="text-purple-400 hover:text-purple-300 text-xs shrink-0 ml-auto">预览</button>
+          </div>
         </div>
         <!-- Loading / Empty -->
         <div v-if="fbLoading" class="text-center py-16 text-gray-500"><span class="spinner"></span> 加载中...</div>
@@ -636,17 +671,74 @@
         <div v-else-if="fbFiles.length === 0 && fbCurrentPath" class="text-center py-16 text-gray-500">空目录</div>
         <!-- File List -->
         <div v-else class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-          <div class="grid grid-cols-[auto_1fr_auto_auto] gap-x-3 md:gap-x-6 text-xs px-3 py-2 border-b border-gray-800 text-gray-500 font-medium">
-            <div></div><div>名称</div><div class="text-right hidden sm:block">大小</div><div class="text-right hidden sm:block">修改时间</div>
+          <div class="grid grid-cols-[auto_1fr_auto_auto] gap-x-3 md:gap-x-6 text-xs px-3 py-2 border-b border-gray-800 text-gray-500 font-medium select-none">
+            <div></div>
+            <div @click="fbToggleSort('name')" class="cursor-pointer hover:text-gray-300">名称 <span v-if="fbSortProp==='name'">{{ fbSortAsc ? '▲' : '▼' }}</span></div>
+            <div @click="fbToggleSort('size')" class="text-right hidden sm:block cursor-pointer hover:text-gray-300">大小 <span v-if="fbSortProp==='size'">{{ fbSortAsc ? '▲' : '▼' }}</span></div>
+            <div @click="fbToggleSort('modified')" class="text-right hidden sm:block cursor-pointer hover:text-gray-300">修改时间 <span v-if="fbSortProp==='modified'">{{ fbSortAsc ? '▲' : '▼' }}</span></div>
           </div>
-          <div v-for="f in fbFiles" :key="f.path"
+          <div v-for="f in fbSortedFiles" :key="f.path"
                @click="f.is_dir && fbNavigate(f.path)"
-               :class="['grid grid-cols-[auto_1fr_auto_auto] gap-x-3 md:gap-x-6 text-xs md:text-sm px-3 py-2 border-b border-gray-800/50 transition-colors',
-                 f.is_dir ? 'cursor-pointer hover:bg-gray-800/50' : '']">
+               :class="['grid grid-cols-[auto_1fr_auto_auto_auto] gap-x-3 md:gap-x-6 text-xs md:text-sm px-3 py-2 border-b border-gray-800/50 transition-colors',
+                 f.is_dir ? 'cursor-pointer hover:bg-gray-800/50' : '']"
+               style="content-visibility: auto; contain-intrinsic-size: auto 36px;">
             <span>{{ f.is_dir ? '📁' : '📄' }}</span>
             <span :class="f.is_dir ? 'text-brand-400' : 'text-gray-300'" class="truncate">{{ f.name }}</span>
             <span class="text-gray-500 text-right hidden sm:block">{{ f.is_dir ? '-' : formatFileSize(f.size) }}</span>
             <span class="text-gray-600 text-right hidden sm:block">{{ f.modified }}</span>
+            <span v-if="!f.is_dir" @click.stop="fbPreviewFile(f)" class="text-brand-400 hover:text-brand-300 cursor-pointer text-xs hidden sm:block">预览</span>
+            <span v-else class="hidden sm:block"></span>
+          </div>
+        </div>
+        <!-- 新建文件夹对话框 -->
+        <div v-if="fbCreateDirShow" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4" @click.self="fbCreateDirShow=false">
+          <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md p-6">
+            <h3 class="text-lg font-bold mb-4">新建文件夹</h3>
+            <input v-model="fbNewDirName" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 mb-4" placeholder="请输入文件夹名称" @keydown.enter="fbDoCreateDir" />
+            <div class="flex justify-end gap-2">
+              <button @click="fbCreateDirShow=false" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm">取消</button>
+              <button @click="fbDoCreateDir" :disabled="fbCreating" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm disabled:opacity-40">确定</button>
+            </div>
+          </div>
+        </div>
+        <!-- 新建文件对话框 -->
+        <div v-if="fbCreateFileShow" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4" @click.self="fbCreateFileShow=false">
+          <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md p-6">
+            <h3 class="text-lg font-bold mb-4">新建文件</h3>
+            <input v-model="fbNewFileName" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 mb-4" placeholder="请输入文件名称" @keydown.enter="fbDoCreateFile" />
+            <div class="flex justify-end gap-2">
+              <button @click="fbCreateFileShow=false" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm">取消</button>
+              <button @click="fbDoCreateFile" :disabled="fbCreating" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm disabled:opacity-40">确定</button>
+            </div>
+          </div>
+        </div>
+        <!-- 文件预览对话框 -->
+        <div v-if="fbPreview.show" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4" @click.self="fbPreview.show=false">
+          <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-3xl p-5 md:p-6 max-h-[85vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-lg font-bold truncate">预览: {{ fbPreview.name }}</h3>
+              <button @click="fbPreview.show=false" class="text-gray-500 hover:text-gray-300 text-xl">&times;</button>
+            </div>
+            <div v-if="fbPreview.loading" class="text-center py-12 text-gray-500"><span class="spinner"></span> 加载文件内容...</div>
+            <div v-else>
+              <pre class="text-xs text-gray-300 bg-gray-800 rounded-lg p-3 max-h-80 overflow-y-auto whitespace-pre-wrap break-all font-mono leading-relaxed border border-gray-700">{{ fbPreview.content }}</pre>
+              <div class="mt-4 pt-3 border-t border-gray-700">
+                <div class="flex items-center justify-between mb-2">
+                  <div class="text-xs font-medium text-gray-300 flex items-center gap-1.5">
+                    <span>🤖 AI 解读</span>
+                    <span v-if="fbPreview.aiResult" class="px-1.5 py-0.5 bg-emerald-900/50 text-emerald-400 rounded text-[10px]">已完成</span>
+                  </div>
+                  <button v-if="!fbPreview.aiResult && !fbPreview.aiLoading" @click="fbRunAiExplain" class="px-2.5 py-1 bg-brand-600 hover:bg-brand-700 rounded text-xs font-medium">AI 解读</button>
+                  <button v-if="fbPreview.aiResult" @click="fbRunAiExplain" :disabled="fbPreview.aiLoading" class="px-2.5 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs">重新解读</button>
+                </div>
+                <div v-if="fbPreview.aiLoading" class="text-center py-4 text-gray-500 text-xs"><span class="spinner"></span> AI 正在解读文件...</div>
+                <pre v-else-if="fbPreview.aiResult" class="text-xs text-gray-300 bg-gray-800 rounded-lg p-3 max-h-60 overflow-y-auto whitespace-pre-wrap break-all leading-relaxed">{{ fbPreview.aiResult }}</pre>
+                <div v-else-if="fbPreview.aiError" class="text-xs text-red-400 py-2">{{ fbPreview.aiError }}</div>
+              </div>
+            </div>
+            <div class="flex justify-end mt-4 pt-3 border-t border-gray-800">
+              <button @click="fbPreview.show=false" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm">关闭</button>
+            </div>
           </div>
         </div>
       </div>
@@ -676,6 +768,7 @@
                 <button @click="ciRefreshConfig" :disabled="ciLoading" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs shrink-0 disabled:opacity-40">刷新配置</button>
                 <button @click="ciTestJenkins" :disabled="ciLoading" class="px-3 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-xs shrink-0 disabled:opacity-40">测试连接</button>
                 <button @click="ciLoadJobs" :disabled="ciLoading" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs shrink-0 disabled:opacity-40">加载作业</button>
+                <button @click="ciClearJenkins" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs shrink-0 text-gray-400 border border-gray-700">清除结果</button>
               </div>
             </div>
 
@@ -695,6 +788,35 @@
                 <input v-model="jenkinsBuildNum" type="text" class="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-brand-500"
                        placeholder="如 29033" style="width: 160px" />
                 <span v-if="jenkinsBuildNum.trim() && getSelectedServerUrl()" class="text-xs text-gray-500 font-mono truncate">{{ getSelectedServerUrl() }}/{{ jenkinsBuildNum.trim() }}/</span>
+              </div>
+            </div>
+            <!-- Build History by User -->
+            <div>
+              <label class="text-xs text-gray-400 mb-1 block">构建历史</label>
+              <div class="flex items-center gap-2">
+                <input v-model="jenkinsUserFilter" type="text" class="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
+                       placeholder="输入用户名查询" style="width: 200px" />
+                <button @click="ciSearchBuildsByUser" :disabled="ciLoading || !jenkinsUserFilter.trim()" class="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs disabled:opacity-40">
+                  <span v-if="ciUserBuildsLoading" class="spinner mr-1"></span>查询
+                </button>
+              </div>
+            </div>
+            <!-- User Builds Results -->
+            <div v-if="jenkinsUserBuilds.length" class="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+              <div class="flex items-center justify-between px-3 py-2 border-b border-gray-800">
+                <span class="text-xs text-gray-400 font-medium">构建历史（{{ jenkinsUserBuilds.length }} 条）</span>
+                <button @click="jenkinsUserBuilds.splice(0)" class="text-xs text-gray-500 hover:text-gray-300">关闭</button>
+              </div>
+              <div class="max-h-64 overflow-y-auto">
+                <div v-for="b in jenkinsUserBuilds" :key="b.number" @click="jenkinsBuildNum = String(b.number)"
+                     class="flex items-center gap-2 px-3 py-2 border-b border-gray-800/50 hover:bg-gray-800/50 cursor-pointer text-xs">
+                  <span class="text-brand-400 font-mono w-14 shrink-0">#{{ b.number }}</span>
+                  <span class="flex-1 text-gray-300 truncate">{{ b.description || b.display_name }}</span>
+                  <span :class="b.result === 'SUCCESS' ? 'text-emerald-400' : b.result === 'FAILURE' ? 'text-red-400' : 'text-yellow-400'" class="shrink-0 w-16 text-right">
+                    {{ b.result || '进行中' }}
+                  </span>
+                  <span class="text-gray-600 shrink-0 w-28 text-right">{{ ciFormatTs(b.timestamp) }}</span>
+                </div>
               </div>
             </div>
             <div>
@@ -763,8 +885,8 @@
         </div>
 
         <!-- Rebuild Dialog -->
-        <div v-if="rebuildDialog.show" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="rebuildDialog.show = false">
-          <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-lg p-5 md:p-6 max-h-[85vh] overflow-y-auto">
+        <div v-if="rebuildDialog.show" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4 pb-[env(safe-area-inset-bottom,16px)]" @click.self="rebuildDialog.show = false">
+          <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg p-5 md:p-6 max-h-[80vh] overflow-y-auto">
             <h3 class="text-lg font-bold mb-4">Rebuild 参数</h3>
             <div class="mb-3">
               <label class="text-xs text-gray-400 mb-1 block">Build URL</label>
@@ -834,6 +956,7 @@
               <button @click="ciSearchGerrit(1)" :disabled="ciLoading" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm disabled:opacity-40 shrink-0">
                 <span v-if="ciLoading" class="spinner mr-1"></span>查询提交
               </button>
+              <button @click="ciClearGerrit" class="px-3 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-xs text-gray-400 border border-gray-700 shrink-0">清除结果</button>
               <span class="text-xs text-gray-500 font-mono truncate">{{ buildGerritQueryPreview }}</span>
             </div>
           </div>
@@ -859,8 +982,8 @@
           </div>
 
           <!-- Gerrit Detail Dialog -->
-          <div v-if="ciGerritDetail.show" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="ciGerritDetail.show = false">
-            <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-2xl p-5 md:p-6 max-h-[85vh] overflow-y-auto">
+          <div v-if="ciGerritDetail.show" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-center justify-center p-4 pb-[env(safe-area-inset-bottom,16px)]" @click.self="ciGerritDetail.show = false">
+            <div class="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-2xl p-5 md:p-6 max-h-[80vh] overflow-y-auto">
               <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-bold">Gerrit 提交详情</h3>
                 <button @click="ciGerritDetail.show = false" class="text-gray-500 hover:text-gray-300 text-xl">&times;</button>
@@ -907,6 +1030,21 @@
                   </div>
                 </div>
 
+                <!-- AI 代码审查 -->
+                <div class="mt-4 pt-3 border-t border-gray-700">
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="text-xs font-medium text-gray-300 flex items-center gap-1.5">
+                      <span>🤖 AI 代码审查</span>
+                      <span v-if="ciGerritDetail.aiResult" class="px-1.5 py-0.5 bg-emerald-900/50 text-emerald-400 rounded text-[10px]">已完成</span>
+                    </div>
+                    <button v-if="!ciGerritDetail.aiResult && !ciGerritDetail.aiLoading" @click="ciRunGerritAiReview" class="px-2.5 py-1 bg-brand-600 hover:bg-brand-700 rounded text-xs font-medium">生成分析</button>
+                    <button v-if="ciGerritDetail.aiResult" @click="ciRunGerritAiReview" :disabled="ciGerritDetail.aiLoading" class="px-2.5 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs">重新分析</button>
+                  </div>
+                  <div v-if="ciGerritDetail.aiLoading" class="text-center py-4 text-gray-500 text-xs"><span class="spinner"></span> AI 正在分析代码变更...</div>
+                  <pre v-else-if="ciGerritDetail.aiResult" class="text-xs text-gray-300 bg-gray-800 rounded-lg p-3 max-h-60 overflow-y-auto whitespace-pre-wrap break-all leading-relaxed">{{ ciGerritDetail.aiResult }}</pre>
+                  <div v-else-if="ciGerritDetail.aiError" class="text-xs text-red-400 py-2">{{ ciGerritDetail.aiError }}</div>
+                </div>
+
                 <div class="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-800">
                   <button @click="ciGerritDetail.show = false" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm">关闭</button>
                   <a :href="ciGerritDetail.data.url" target="_blank" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm font-medium inline-block">在浏览器中打开</a>
@@ -945,20 +1083,23 @@
     <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 md:p-6 max-h-[85vh] overflow-y-auto">
       <h3 class="text-lg font-bold mb-4">编译构建</h3>
       <div class="mb-4">
-        <label class="text-sm text-gray-400 mb-1 block">构建脚本</label>
-        <textarea v-model="buildScript" rows="3"
-                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 resize-none"
-                  placeholder="例如: source build/envsetup.sh && lunch xxx && make -j8"></textarea>
-      </div>
-      <!-- Build Templates -->
-      <div class="mb-4">
-        <label class="text-sm text-gray-400 mb-2 block">常用模板</label>
+        <label class="text-sm text-gray-400 mb-2 block">编译类型</label>
         <div class="flex flex-wrap gap-2">
           <button v-for="t in buildTemplates" :key="t.name" @click="buildScript = t.script"
-                  class="px-2 py-1 bg-gray-800 border border-gray-700 rounded text-xs text-gray-400 hover:border-brand-500 hover:text-brand-400 transition-colors">
+                  :class="buildScript === t.script ? 'border-brand-500 text-brand-400 bg-brand-500/10' : 'border-gray-700 text-gray-400 bg-gray-800'"
+                  class="px-3 py-1.5 border rounded-lg text-xs hover:border-brand-500 hover:text-brand-400 transition-colors">
             {{ t.name }}
           </button>
         </div>
+      </div>
+      <div v-if="buildTemplates.find(t => t.script === buildScript && t.desc)" class="mb-3 px-3 py-2 bg-blue-900/20 border border-blue-800/30 rounded-lg">
+        <div class="text-xs text-blue-400">{{ buildTemplates.find(t => t.script === buildScript).desc }}</div>
+      </div>
+      <div class="mb-4">
+        <label class="text-sm text-gray-400 mb-1 block">自定义命令（或修改上方选择的脚本）</label>
+        <textarea v-model="buildScript" rows="3"
+                  class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500 resize-none"
+                  placeholder="选择上方编译类型或输入自定义命令"></textarea>
       </div>
       <div class="flex gap-3 justify-end">
         <button @click="showBuildDialog = false" class="px-4 py-2 text-sm text-gray-400 hover:text-gray-200">取消</button>
@@ -1074,6 +1215,29 @@
     </div>
   </div>
 
+  <!-- Edit Workspace Dialog -->
+  <div v-if="editWs.show" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 flex items-end md:items-center justify-center md:p-4" @click.self="editWs.show = false">
+    <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-md p-5 md:p-6">
+      <h3 class="text-lg font-bold mb-4">编辑工作区</h3>
+      <div class="space-y-3">
+        <div>
+          <label class="text-sm text-gray-400 mb-1 block">名称</label>
+          <input v-model="editWs.name" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500" />
+        </div>
+        <div>
+          <label class="text-sm text-gray-400 mb-1 block">路径</label>
+          <input v-model="editWs.path" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500" />
+        </div>
+      </div>
+      <div class="flex gap-3 justify-end mt-5">
+        <button @click="editWs.show = false" class="px-4 py-2 text-sm text-gray-400 hover:text-gray-200">取消</button>
+        <button @click="saveEditWs" :disabled="!editWs.name.trim() || !editWs.path.trim() || editWs.saving" class="px-4 py-2 bg-brand-600 hover:bg-brand-700 rounded-lg text-sm font-medium disabled:opacity-40">
+          {{ editWs.saving ? '保存中...' : '保存' }}
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Confirm Dialog -->
   <div v-if="confirmDialog.show" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end md:items-center justify-center md:p-4" @click.self="confirmDialog.show = false">
     <div class="bg-gray-900 border border-gray-700 rounded-t-2xl md:rounded-2xl w-full max-w-sm p-5 md:p-6">
@@ -1107,6 +1271,7 @@ createApp({
     const expandedCmd = ref(null)
     const historyFilter = ref('')
     const historySearch = ref('')
+    const historyPageSize = ref(20)
     const refreshCountdown = ref(10)
     const showApiKey = ref(false)
     const connectionTestResult = ref(null)
@@ -1118,6 +1283,7 @@ createApp({
     const showCustomDialog = ref(false)
     const showJenkinsDialog = ref(false)
     const showAddWorkspace = ref(false)
+    const editWs = reactive({ show: false, id: '', name: '', path: '', saving: false })
 
     const buildScript = ref('')
     const cherryIds = ref('')
@@ -1131,7 +1297,7 @@ createApp({
       apiUrl: localStorage.getItem('mdc_api_url') || 'https://my-device-control-web.pages.dev/api',
       apiKey: localStorage.getItem('mdc_api_key') || '',
       pollInterval: parseInt(localStorage.getItem('mdc_poll_interval') || '5'),
-      refreshInterval: parseInt(localStorage.getItem('mdc_refresh_interval') || '10')
+      refreshInterval: parseInt(localStorage.getItem('mdc_refresh_interval') || '30')
     })
 
     // Terminal state (xterm.js)
@@ -1153,6 +1319,19 @@ createApp({
     const fbPathInput = ref('~')
     const fbFiles = ref([])
     const fbLoading = ref(false)
+    const fbSortProp = ref('')
+    const fbSortAsc = ref(true)
+    const fbSearchKeyword = ref('')
+    const fbSearching = ref(false)
+    const fbSearchResults = ref([])
+    const fbSearchTotal = ref(0)
+    const fbCreateDirShow = ref(false)
+    const fbCreateFileShow = ref(false)
+    const fbNewDirName = ref('')
+    const fbNewFileName = ref('')
+    const fbCreating = ref(false)
+    const fbShowHidden = ref(false)
+    const fbPreview = reactive({ show: false, loading: false, name: '', path: '', content: '', aiResult: '', aiLoading: false, aiError: '' })
 
     // CI Tools state
     const ciTab = ref('jenkins')
@@ -1164,6 +1343,9 @@ createApp({
     const jenkinsBuildNum = ref('')
     const jenkinsJobDetail = ref(null)
     const jenkinsParamValues = reactive({})
+    const jenkinsUserFilter = ref('')
+    const jenkinsUserBuilds = ref([])
+    const ciUserBuildsLoading = ref(false)
     // Jenkins Rebuild
     const jenkinsQueryNum = ref('')
 
@@ -1199,7 +1381,7 @@ createApp({
     const gerritHasMore = ref(false)
     const ciGerritResults = ref([])
     const ciGerritSearched = ref(false)
-    const ciGerritDetail = reactive({ show: false, loading: false, data: null })
+    const ciGerritDetail = reactive({ show: false, loading: false, data: null, aiResult: '', aiLoading: false, aiError: '' })
 
     const navItems = [
       { id: 'dashboard', icon: '📊', label: '仪表板' },
@@ -1221,10 +1403,13 @@ createApp({
     ]
 
     const buildTemplates = [
-      { name: 'AOSP 完整编译', script: 'source build/envsetup.sh && lunch aosp_arm64-userdebug && make -j$(nproc)' },
-      { name: '内核编译', script: '__KERNEL_BUILD__:' },
-      { name: 'Make Clean', script: 'make clean' },
-      { name: 'Make Bootimage', script: 'source build/envsetup.sh && lunch aosp_arm64-userdebug && make bootimage -j$(nproc)' }
+      { name: 'AP 侧整编', script: './turbox_build.sh -l -a' },
+      { name: 'BP 侧整编', script: 'cd BP-CODE && ./turbox_build.sh -l -b' },
+      { name: 'Update Common Info', script: 'cd BP-CODE && ./turbox_build.sh -l -u' },
+      { name: 'Kernel (kalama)', script: '__KERNEL_BUILD__:kalama', desc: '自动检测目录 → source build/envsetup.sh → lunch kalama-userdebug → Kernel 编译' },
+      { name: 'Kernel (kona)', script: '__KERNEL_BUILD__:kona', desc: '自动检测目录 → source build/envsetup.sh → lunch kona-userdebug → Kernel 编译' },
+      { name: 'Kernel (ren)', script: '__KERNEL_BUILD__:ren', desc: '自动检测目录 → source build/envsetup.sh → lunch ren-userdebug → Kernel 编译' },
+      { name: 'Kernel (lahaina)', script: '__KERNEL_BUILD__:lahaina', desc: '自动检测目录 → source build/envsetup.sh → lunch lahaina-userdebug → Kernel 编译' },
     ]
 
     const quickCommands = [
@@ -1238,7 +1423,7 @@ createApp({
     ]
 
     const mobileNavItems = computed(() => {
-      const mobileIds = ['ops', 'terminal', 'files', 'ci', 'history', 'settings']
+      const mobileIds = ['ops', 'terminal', 'files', 'ci', 'history', 'workspaces', 'settings']
       return navItems.filter(n => mobileIds.includes(n.id))
     })
 
@@ -1259,6 +1444,16 @@ createApp({
 
     const recentCommands = computed(() => commands.value.slice(0, 5))
 
+    function buildSearchText(cmd) {
+      const parts = [cmd.action || '', cmd.workspace_name || '', cmd.result || '', cmd.id || '']
+      if (cmd.params) {
+        for (const v of Object.values(cmd.params)) {
+          if (v != null) parts.push(String(v))
+        }
+      }
+      return parts.join(' ').toLowerCase()
+    }
+
     const filteredCommands = computed(() => {
       let list = commands.value
       if (historyFilter.value) {
@@ -1266,13 +1461,7 @@ createApp({
       }
       if (historySearch.value.trim()) {
         const q = historySearch.value.toLowerCase()
-        list = list.filter(c =>
-          (c.action || '').toLowerCase().includes(q) ||
-          (c.workspace_name || '').toLowerCase().includes(q) ||
-          (c.result || '').toLowerCase().includes(q) ||
-          (c.id || '').toLowerCase().includes(q) ||
-          JSON.stringify(c.params || {}).toLowerCase().includes(q)
-        )
+        list = list.filter(c => buildSearchText(c).includes(q))
       }
       return list
     })
@@ -1287,21 +1476,36 @@ createApp({
       return { 'Content-Type': 'application/json', 'X-API-Key': settings.apiKey }
     }
 
-    async function apiCall(method, path, body) {
+    async function apiCall(method, path, body, timeoutMs = 30000) {
       const base = apiBaseUrl.value
-      const opts = { method, headers: apiHeaders() }
+      const headers = apiHeaders()
+      const opts = { method, headers }
       if (body) opts.body = JSON.stringify(body)
-      const resp = await fetch(`${base}${path}`, opts)
-      if (!resp.ok) {
-        const text = await resp.text().catch(() => resp.statusText)
-        throw new Error(text || `HTTP ${resp.status}`)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+      opts.signal = controller.signal
+      try {
+        let resp = await fetch(`${base}${path}`, opts)
+        clearTimeout(timeoutId)
+        if (resp.status === 401 && method === 'GET') {
+          const retryOpts = { method, headers: { 'Content-Type': 'application/json' } }
+          resp = await fetch(`${base}${path}`, retryOpts)
+        }
+        if (!resp.ok) {
+          const text = await resp.text().catch(() => resp.statusText)
+          throw new Error(text || `HTTP ${resp.status}`)
+        }
+        return resp.json()
+      } catch (e) {
+        clearTimeout(timeoutId)
+        if (e.name === 'AbortError') throw new Error(`请求超时(${Math.round(timeoutMs/1000)}s)`)
+        throw e
       }
-      return resp.json()
     }
 
     async function checkConnection() {
       try {
-        await apiCall('GET', '/commands?limit=1')
+        await apiCall('GET', '/commands?limit=1', null, 10000)
         connected.value = true
       } catch {
         connected.value = false
@@ -1310,7 +1514,7 @@ createApp({
 
     async function checkHeartbeat() {
       try {
-        const data = await apiCall('GET', '/heartbeat')
+        const data = await apiCall('GET', '/heartbeat', null, 10000)
         desktopOnline.value = data.online || false
         heartbeatData.value = data.heartbeat
       } catch {
@@ -1320,17 +1524,39 @@ createApp({
     }
 
     let lastFetchFailed = false
+    let fetchInFlight = false
 
     async function fetchCommands(showError = false) {
+      if (fetchInFlight) return
+      fetchInFlight = true
       try {
-        const data = await apiCall('GET', '/commands?limit=100')
-        commands.value = data.commands || []
+        const data = await apiCall('GET', '/commands?limit=100', null, 15000)
+        const newCmds = data.commands || []
+        // Incremental diff: merge instead of full replace
+        if (commands.value.length > 0 && newCmds.length > 0) {
+          const existingMap = new Map(commands.value.map(c => [c.id, c]))
+          let changed = false
+          for (const nc of newCmds) {
+            const existing = existingMap.get(nc.id)
+            if (!existing || existing.status !== nc.status || existing.result !== nc.result || existing.updated_at !== nc.updated_at) {
+              changed = true
+              break
+            }
+          }
+          if (changed || newCmds.length !== commands.value.length) {
+            commands.value = newCmds
+          }
+        } else {
+          commands.value = newCmds
+        }
         if (lastFetchFailed) { lastFetchFailed = false; connected.value = true }
       } catch (e) {
         if (!lastFetchFailed && !showError) {
           lastFetchFailed = true
         }
         if (showError) toast('获取命令历史失败: ' + e.message, 'error')
+      } finally {
+        fetchInFlight = false
       }
     }
 
@@ -1499,6 +1725,34 @@ createApp({
       toast(wsList.length > 1 ? `已添加 ${wsList.length} 个工作区（含 mdep/vendor）` : '工作区已添加')
     }
 
+    function openEditWs(ws) {
+      editWs.id = ws.id
+      editWs.name = ws.name || ''
+      editWs.path = ws.path || ''
+      editWs.saving = false
+      editWs.show = true
+    }
+
+    async function saveEditWs() {
+      if (!editWs.name.trim() || !editWs.path.trim()) return
+      editWs.saving = true
+      try {
+        const idx = workspaces.value.findIndex(w => w.id === editWs.id)
+        if (idx >= 0) {
+          workspaces.value[idx].name = editWs.name.trim()
+          workspaces.value[idx].path = editWs.path.trim()
+          localStorage.setItem('mdc_workspaces', JSON.stringify(workspaces.value))
+          await apiCall('POST', '/workspaces', { workspaces: workspaces.value })
+          toast('工作区更新成功')
+        }
+        editWs.show = false
+      } catch (e) {
+        toast('更新失败: ' + e.message, 'error')
+      } finally {
+        editWs.saving = false
+      }
+    }
+
     async function deleteWorkspace(id) {
       const ws = workspaces.value.find(w => w.id === id)
       const subs = ws ? getWebSubBranches(ws) : []
@@ -1616,7 +1870,7 @@ createApp({
         settings.apiUrl = 'https://my-device-control-web.pages.dev/api'
         settings.apiKey = ''
         settings.pollInterval = 5
-        settings.refreshInterval = 10
+        settings.refreshInterval = 30
         toast('本地缓存已清除')
       }
       confirmDialog.show = true
@@ -1628,16 +1882,28 @@ createApp({
 
     // ===== Core: send command and wait for result =====
     async function sendAndWaitCommand(action, params = {}, timeoutSec = 120) {
-      const resp = await apiCall('POST', '/commands', { action, params })
+      const resp = await apiCall('POST', '/commands', { action, params }, 20000)
       const cmdId = resp.command?.id
       if (!cmdId) throw new Error('创建命令失败')
       const startMs = Date.now()
       const deadlineMs = startMs + timeoutSec * 1000
-      let pollMs = 800
+      // 更激进的自适应轮询：前 2s 150ms、2-10s 300ms、10-30s 800ms、之后 1500ms
+      let pollMs = 150
+      // 立即做一次查询，尝试捕获快速返回的结果
+      try {
+        const detail = await apiCall('GET', `/commands/${cmdId}`, null, 15000)
+        const c = detail.command
+        if (c) {
+          if (c.status === 'success') return c.result
+          if (c.status === 'failed') throw new Error(c.result || '命令执行失败')
+        }
+      } catch (e) {
+        if (e.message && !e.message.includes('HTTP')) throw e
+      }
       while (Date.now() < deadlineMs) {
         await new Promise(r => setTimeout(r, pollMs))
         try {
-          const detail = await apiCall('GET', `/commands/${cmdId}`)
+          const detail = await apiCall('GET', `/commands/${cmdId}`, null, 15000)
           const c = detail.command
           if (!c) continue
           if (c.status === 'success') return c.result
@@ -1645,7 +1911,11 @@ createApp({
         } catch (e) {
           if (e.message && !e.message.includes('HTTP')) throw e
         }
-        if (Date.now() - startMs > 15000) pollMs = 1500
+        const elapsed = Date.now() - startMs
+        if (elapsed > 30000) pollMs = 1500
+        else if (elapsed > 10000) pollMs = 800
+        else if (elapsed > 2000) pollMs = 300
+        else pollMs = 150
       }
       throw new Error('命令执行超时')
     }
@@ -1793,6 +2063,164 @@ createApp({
 
     function fbRefresh() { fbNavigate(fbCurrentPath.value || '~') }
 
+    async function fbSearchFiles() {
+      if (!fbDeviceId.value || !fbSearchKeyword.value.trim()) return
+      fbSearching.value = true
+      try {
+        const result = await sendAndWaitCommand('search-file', {
+          device_id: fbDeviceId.value,
+          keyword: fbSearchKeyword.value.trim(),
+          path: fbCurrentPath.value || '~'
+        }, 30)
+        const data = JSON.parse(result || '{"total":0,"files":[]}')
+        fbSearchResults.value = data.files || []
+        fbSearchTotal.value = data.total || 0
+        if (fbSearchResults.value.length === 0) {
+          toast('未找到匹配文件', 'warning')
+        }
+      } catch (e) {
+        toast('搜索失败: ' + e.message, 'error')
+      } finally {
+        fbSearching.value = false
+      }
+    }
+
+    function fbClearSearch() {
+      fbSearchResults.value = []
+      fbSearchTotal.value = 0
+      fbSearchKeyword.value = ''
+    }
+
+    function fbNavigateToSearchResult(path) {
+      const dir = path.substring(0, path.lastIndexOf('/')) || '~'
+      fbNavigate(dir)
+    }
+
+    async function fbPreviewSearchResult(path) {
+      fbPreview.show = true
+      fbPreview.path = path
+      fbPreview.content = ''
+      fbPreview.aiResult = ''
+      fbPreview.aiError = ''
+      try {
+        fbPreview.content = await sendAndWaitCommand('preview-remote-file', { device_id: fbDeviceId.value, remote_path: path }, 30)
+      } catch (e) {
+        toast('预览失败: ' + e.message, 'error')
+      }
+    }
+
+    const fbSortedFiles = computed(() => {
+      let list = [...fbFiles.value]
+      if (!fbShowHidden.value) {
+        list = list.filter(f => !f.name.startsWith('.'))
+      }
+      if (!fbSortProp.value) return list
+      const prop = fbSortProp.value
+      const asc = fbSortAsc.value
+      list.sort((a, b) => {
+        if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1
+        let cmp = 0
+        if (prop === 'name') cmp = (a.name || '').localeCompare(b.name || '', 'zh')
+        else if (prop === 'size') cmp = (a.size || 0) - (b.size || 0)
+        else if (prop === 'modified') cmp = (a.modified || '').localeCompare(b.modified || '')
+        return asc ? cmp : -cmp
+      })
+      return list
+    })
+
+    function fbToggleSort(prop) {
+      if (fbSortProp.value === prop) {
+        if (fbSortAsc.value) { fbSortAsc.value = false }
+        else { fbSortProp.value = ''; fbSortAsc.value = true }
+      } else {
+        fbSortProp.value = prop
+        fbSortAsc.value = true
+      }
+    }
+
+    function fbShowCreateDir() {
+      if (!fbDeviceId.value) { toast('请先选择设备', 'error'); return }
+      fbNewDirName.value = ''
+      fbCreateDirShow.value = true
+    }
+
+    function fbShowCreateFile() {
+      if (!fbDeviceId.value) { toast('请先选择设备', 'error'); return }
+      fbNewFileName.value = ''
+      fbCreateFileShow.value = true
+    }
+
+    async function fbDoCreateDir() {
+      const name = fbNewDirName.value.trim()
+      if (!name) { toast('请输入文件夹名称', 'error'); return }
+      const base = (fbCurrentPath.value || '~').replace(/\/+$/, '')
+      const fullPath = base + '/' + name
+      fbCreating.value = true
+      try {
+        await sendAndWaitCommand('create-remote-directory', { device_id: fbDeviceId.value, path: fullPath })
+        toast('文件夹 "' + name + '" 创建成功')
+        fbCreateDirShow.value = false
+        fbRefresh()
+      } catch (e) {
+        toast('创建文件夹失败: ' + e.message, 'error')
+      } finally {
+        fbCreating.value = false
+      }
+    }
+
+    async function fbDoCreateFile() {
+      const name = fbNewFileName.value.trim()
+      if (!name) { toast('请输入文件名称', 'error'); return }
+      const base = (fbCurrentPath.value || '~').replace(/\/+$/, '')
+      const fullPath = base + '/' + name
+      fbCreating.value = true
+      try {
+        await sendAndWaitCommand('create-remote-file', { device_id: fbDeviceId.value, path: fullPath })
+        toast('文件 "' + name + '" 创建成功')
+        fbCreateFileShow.value = false
+        fbRefresh()
+      } catch (e) {
+        toast('创建文件失败: ' + e.message, 'error')
+      } finally {
+        fbCreating.value = false
+      }
+    }
+
+    async function fbPreviewFile(f) {
+      if (!fbDeviceId.value || f.is_dir) return
+      if (!ensureDesktopOnline()) return
+      fbPreview.show = true
+      fbPreview.loading = true
+      fbPreview.name = f.name
+      fbPreview.path = f.path
+      fbPreview.content = ''
+      fbPreview.aiResult = ''
+      fbPreview.aiLoading = false
+      fbPreview.aiError = ''
+      try {
+        fbPreview.content = await sendAndWaitCommand('preview-remote-file', { device_id: fbDeviceId.value, remote_path: f.path }, 30)
+      } catch (e) {
+        toast('预览失败: ' + e.message, 'error')
+        fbPreview.show = false
+      } finally {
+        fbPreview.loading = false
+      }
+    }
+
+    async function fbRunAiExplain() {
+      if (!fbPreview.content || !ensureDesktopOnline()) return
+      fbPreview.aiLoading = true
+      fbPreview.aiResult = ''
+      fbPreview.aiError = ''
+      try {
+        fbPreview.aiResult = await sendAndWaitCommand('ai-explain-file', { file_path: fbPreview.path, file_content: fbPreview.content }, 60)
+      } catch (e) {
+        fbPreview.aiError = e.message || String(e)
+      } finally {
+        fbPreview.aiLoading = false
+      }
+    }
+
     function formatFileSize(bytes) {
       if (bytes === 0) return '0 B'
       const k = 1024, sizes = ['B', 'KB', 'MB', 'GB']
@@ -1809,18 +2237,81 @@ createApp({
       return true
     }
 
+    function ciFormatTs(ts) {
+      if (!ts) return '-'
+      const d = new Date(ts)
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+    }
+
+    async function ciSearchBuildsByUser() {
+      const user = jenkinsUserFilter.value.trim()
+      if (!user) { toast('请输入用户名', 'error'); return }
+      if (!getSelectedServerUrl()) { toast('请先选择 Jenkins 服务器', 'error'); return }
+      if (!ensureDesktopOnline()) return
+      ciUserBuildsLoading.value = true
+      ciLoading.value = true
+      try {
+        const result = await sendAndWaitCommand('jenkins-build-history', {
+          server_id: jenkinsSelectedServer.value,
+          job_url: getSelectedServerUrl(),
+          limit: 200
+        })
+        if (result && result.result) {
+          const all = JSON.parse(result.result)
+          const lc = user.toLowerCase()
+          jenkinsUserBuilds.value = all.filter(b => {
+            const dn = (b.display_name || '').toLowerCase()
+            const desc = (b.description || '').toLowerCase()
+            return dn.includes(lc) || desc.includes(lc)
+          })
+          if (!jenkinsUserBuilds.value.length) toast('未找到匹配的构建记录')
+        }
+      } catch (e) {
+        toast(String(e), 'error')
+      } finally {
+        ciUserBuildsLoading.value = false
+        ciLoading.value = false
+      }
+    }
+
+    function ciClearJenkins() {
+      jenkinsJobDetail.value = null
+      Object.keys(jenkinsParamValues).forEach(k => delete jenkinsParamValues[k])
+      ciBuildDetail.value = null
+      jenkinsUserBuilds.value = []
+      jenkinsJobList.value = []
+    }
+
+    function ciClearGerrit() {
+      ciGerritResults.value = []
+      ciGerritSearched.value = false
+      ciGerritDetail.show = false
+      ciGerritDetail.data = null
+    }
+
+    function loadCachedJenkinsServers() {
+      try {
+        const cached = localStorage.getItem('mdc_jenkins_servers')
+        if (cached) jenkinsServerList.value = JSON.parse(cached)
+      } catch {}
+    }
+
     async function ciRefreshConfig() {
       if (!ensureDesktopOnline()) return
       ciLoading.value = true
       try {
         const result = await sendAndWaitCommand('jenkins-list-jobs', {
           server_id: jenkinsSelectedServer.value || undefined
-        }, 60)
+        }, 30)
         const data = JSON.parse(result)
-        if (data.servers) jenkinsServerList.value = data.servers
+        if (data.servers) {
+          jenkinsServerList.value = data.servers
+          localStorage.setItem('mdc_jenkins_servers', JSON.stringify(data.servers))
+        }
+        if (data.jobs) jenkinsJobList.value = data.jobs
         toast('已刷新 Jenkins 配置')
       } catch (e) {
-        toast('刷新配置失败: ' + e.message, 'error')
+        toast('刷新配置失败: ' + e.message + '（请确认桌面端应用已运行且 Web 触发器已启用）', 'error')
       } finally {
         ciLoading.value = false
       }
@@ -1946,12 +2437,43 @@ createApp({
       }
     }
 
-    function ciOpenRebuildDialog() {
+    async function ciOpenRebuildDialog() {
       const url = buildJenkinsUrl(jenkinsQueryNum.value)
       if (!url) return
       rebuildDialog.buildUrl = url
-      rebuildDialog.overrideEnabled = false
       rebuildDialog.overrides = { GERRITID_QSSI: '', GERRITID_VENDOR: '', GERRITID_LE: '', GERRITID_MDEP: '' }
+
+      if (!ciBuildDetail.value || String(ciBuildDetail.value.number) !== jenkinsQueryNum.value.trim()) {
+        if (ensureDesktopOnline()) {
+          try {
+            const result = await sendAndWaitCommand('jenkins-build-detail', {
+              build_url: url,
+              server_id: jenkinsSelectedServer.value || undefined
+            }, 60)
+            ciBuildDetail.value = JSON.parse(result)
+          } catch (e) {
+            toast('获取 Build 参数失败，GERRITID 不会自动填入', 'error')
+          }
+        }
+      }
+
+      let hasGerritId = false
+      const gerritKeyMap = {
+        'gerritid_qssi': 'GERRITID_QSSI',
+        'gerritid_vendor': 'GERRITID_VENDOR',
+        'gerritid_le': 'GERRITID_LE',
+        'gerritid_mdep': 'GERRITID_MDEP'
+      }
+      if (ciBuildDetail.value?.parameters) {
+        for (const p of ciBuildDetail.value.parameters) {
+          const mappedKey = gerritKeyMap[p.name.toLowerCase()]
+          if (mappedKey && p.value && p.value.trim()) {
+            rebuildDialog.overrides[mappedKey] = p.value
+            hasGerritId = true
+          }
+        }
+      }
+      rebuildDialog.overrideEnabled = hasGerritId
       rebuildDialog.show = true
     }
 
@@ -1961,11 +2483,11 @@ createApp({
         const overrides = {}
         if (rebuildDialog.overrideEnabled) {
           for (const [k, v] of Object.entries(rebuildDialog.overrides)) {
-            if (v.trim()) overrides[k] = v.trim()
+            overrides[k] = (v || '').trim()
           }
         }
         const params = { build_url: rebuildDialog.buildUrl }
-        if (Object.keys(overrides).length > 0) params.parameter_overrides = overrides
+        if (rebuildDialog.overrideEnabled) params.parameter_overrides = overrides
         const result = await sendAndWaitCommand('jenkins-rebuild', params)
         const data = JSON.parse(result)
         if (data.build_url) jenkinsQueryNum.value = extractBuildNum(data.build_url)
@@ -2000,14 +2522,33 @@ createApp({
       ciGerritDetail.show = true
       ciGerritDetail.loading = true
       ciGerritDetail.data = null
+      ciGerritDetail.aiResult = ''
+      ciGerritDetail.aiLoading = false
+      ciGerritDetail.aiError = ''
       try {
         const result = await sendAndWaitCommand('gerrit-change-detail', { change_number: ch.number }, 30)
         ciGerritDetail.data = JSON.parse(result)
+        ciRunGerritAiReview()
       } catch (e) {
         toast('获取 Gerrit 详情失败: ' + e.message, 'error')
         ciGerritDetail.show = false
       } finally {
         ciGerritDetail.loading = false
+      }
+    }
+
+    async function ciRunGerritAiReview() {
+      if (!ciGerritDetail.data || !ensureDesktopOnline()) return
+      ciGerritDetail.aiLoading = true
+      ciGerritDetail.aiResult = ''
+      ciGerritDetail.aiError = ''
+      try {
+        const result = await sendAndWaitCommand('ai-review-gerrit', { change_json: JSON.stringify(ciGerritDetail.data) }, 60)
+        ciGerritDetail.aiResult = result
+      } catch (e) {
+        ciGerritDetail.aiError = e.message || String(e)
+      } finally {
+        ciGerritDetail.aiLoading = false
       }
     }
 
@@ -2048,7 +2589,7 @@ createApp({
       const map = {
         'sync': 'Repo 同步', 'force-sync': '强制同步', 'build': '编译构建',
         'cherry': 'Cherry-Pick', 'custom': '自定义命令', 'jenkins-rebuild': 'Jenkins 重建',
-        'terminal-exec': '终端命令', 'file-list': '文件浏览',
+        'terminal-exec': '终端命令', 'file-list': '文件浏览', 'search-file': '文件搜索',
         'jenkins-list-jobs': 'Jenkins 作业列表', 'jenkins-job-detail': 'Jenkins 作业详情',
         'jenkins-trigger-build': 'Jenkins 构建', 'jenkins-build-detail': 'Jenkins 构建详情',
         'gerrit-search': 'Gerrit 搜索'
@@ -2105,16 +2646,29 @@ createApp({
 
     let refreshTimer = null
     let countdownTimer = null
+    let heartbeatTimer = null
 
     const TIMEOUT_PENDING_MS = 5 * 60 * 1000
     const TIMEOUT_RUNNING_MS = 30 * 60 * 1000
+
+    const IDLE_THRESHOLD_MS = 60 * 1000
+    let lastActivityTime = Date.now()
+    const isIdle = ref(false)
+
+    function trackUserActivity() {
+      lastActivityTime = Date.now()
+      if (isIdle.value) {
+        isIdle.value = false
+        startAutoRefresh()
+      }
+    }
 
     async function autoTimeoutCommands() {
       const now = Date.now()
       for (const cmd of commands.value) {
         const created = new Date(cmd.created_at).getTime()
         const updated = new Date(cmd.updated_at).getTime()
-        if (cmd.status === 'pending' && now - created > TIMEOUT_PENDING_MS) {
+        if ((cmd.status === 'pending' || cmd.status === 'leased') && now - created > TIMEOUT_PENDING_MS) {
           try {
             await apiCall('PUT', `/commands/${cmd.id}`, { status: 'failed', result: '命令等待超时 (5分钟未被桌面端执行)' })
           } catch {}
@@ -2126,25 +2680,52 @@ createApp({
       }
     }
 
+    let adaptiveIntervalMs = settings.refreshInterval * 1000
+    const MIN_REFRESH_MS = 1500
+    const MAX_REFRESH_MS = 60000
+    const HEARTBEAT_INTERVAL_MS = 30000
+
     function startAutoRefresh() {
       stopAutoRefresh()
-      refreshCountdown.value = settings.refreshInterval
+      refreshCountdown.value = Math.round(adaptiveIntervalMs / 1000)
       countdownTimer = setInterval(() => {
+        if (Date.now() - lastActivityTime > IDLE_THRESHOLD_MS) {
+          if (!isIdle.value) {
+            isIdle.value = true
+            stopAutoRefresh()
+          }
+          return
+        }
         refreshCountdown.value--
         if (refreshCountdown.value <= 0) {
-          refreshCountdown.value = settings.refreshInterval
+          refreshCountdown.value = Math.round(adaptiveIntervalMs / 1000)
         }
       }, 1000)
       refreshTimer = setInterval(() => {
-        fetchCommands().then(() => autoTimeoutCommands())
-        checkHeartbeat()
-        refreshCountdown.value = settings.refreshInterval
-      }, settings.refreshInterval * 1000)
+        if (isIdle.value) return
+        const page = currentPage.value
+        if (page === 'dashboard' || page === 'history') {
+          fetchCommands().then(() => {
+            autoTimeoutCommands()
+            const hasActive = commands.value.some(c => c.status === 'running' || c.status === 'pending' || c.status === 'leased')
+            const newInterval = hasActive ? MIN_REFRESH_MS : (settings.refreshInterval * 1000)
+            if (newInterval !== adaptiveIntervalMs) {
+              adaptiveIntervalMs = newInterval
+              startAutoRefresh()
+            }
+          })
+        }
+        refreshCountdown.value = Math.round(adaptiveIntervalMs / 1000)
+      }, adaptiveIntervalMs)
+      heartbeatTimer = setInterval(() => {
+        if (!isIdle.value) checkHeartbeat()
+      }, HEARTBEAT_INTERVAL_MS)
     }
 
     function stopAutoRefresh() {
       if (refreshTimer) clearInterval(refreshTimer)
       if (countdownTimer) clearInterval(countdownTimer)
+      if (heartbeatTimer) clearInterval(heartbeatTimer)
     }
 
     onMounted(() => {
@@ -2167,11 +2748,21 @@ createApp({
       checkHeartbeat()
       fetchWorkspaces()
       fetchCommands()
+      loadCachedJenkinsServers()
       startAutoRefresh()
+
+      document.addEventListener('click', trackUserActivity)
+      document.addEventListener('keydown', trackUserActivity)
+      document.addEventListener('touchstart', trackUserActivity)
+      document.addEventListener('scroll', trackUserActivity, true)
     })
 
     onUnmounted(() => {
       stopAutoRefresh()
+      document.removeEventListener('click', trackUserActivity)
+      document.removeEventListener('keydown', trackUserActivity)
+      document.removeEventListener('touchstart', trackUserActivity)
+      document.removeEventListener('scroll', trackUserActivity, true)
     })
 
     watch(currentPage, (newPage, oldPage) => {
@@ -2188,11 +2779,11 @@ createApp({
     return {
       currentPage, connected, desktopOnline, heartbeatData, sending, toasts,
       commands, workspaces, selectedWorkspace, expandedCmd,
-      historyFilter, historySearch, refreshCountdown, showApiKey,
+      historyFilter, historySearch, historyPageSize, refreshCountdown, isIdle, trackUserActivity, showApiKey,
       connectionTestResult, workspaceSyncInfo,
       showBuildDialog, showCherryDialog, showCustomDialog, showJenkinsDialog, showAddWorkspace,
       buildScript, cherryIds, customCommand, jenkinsRef,
-      newWorkspace, confirmDialog, settings, navItems, filterTabs,
+      newWorkspace, confirmDialog, editWs, openEditWs, saveEditWs, settings, navItems, filterTabs,
       buildTemplates, quickCommands, apiBaseUrl,
       stats, pendingCount, recentCommands, filteredCommands,
       uniqueDevices, mobileNavItems,
@@ -2202,18 +2793,27 @@ createApp({
       // File Browser
       fbDeviceId, fbCurrentPath, fbPathInput, fbFiles, fbLoading,
       fbPathSegments, fbNavigate, fbRefresh, formatFileSize,
+      fbSortProp, fbSortAsc, fbSortedFiles, fbToggleSort, fbShowHidden,
+      fbCreateDirShow, fbCreateFileShow, fbNewDirName, fbNewFileName, fbCreating, fbPreview,
+      fbPreviewFile, fbRunAiExplain,
+      fbSearchKeyword, fbSearching, fbSearchResults, fbSearchTotal,
+      fbSearchFiles, fbClearSearch, fbNavigateToSearchResult, fbPreviewSearchResult,
+      fbShowCreateDir, fbShowCreateFile, fbDoCreateDir, fbDoCreateFile,
       // CI Tools - Jenkins
       ciTab, ciLoading, jenkinsBuildNum, jenkinsQueryNum, ciBuildDetail, rebuildDialog,
       jenkinsSelectedServer, jenkinsServerList, jenkinsJobList,
       jenkinsJobDetail, jenkinsParamValues,
+      jenkinsUserFilter, jenkinsUserBuilds, ciUserBuildsLoading,
       getSelectedServerUrl, buildJenkinsUrl, extractBuildNum,
       ciRefreshConfig, ciTestJenkins, ciLoadJobs, ciLoadJobDetail, ciTriggerBuild,
       ciQueryBuild, ciOpenRebuildDialog, ciRebuild, ciOpenBuildPage,
+      ciSearchBuildsByUser, ciClearJenkins, ciFormatTs,
       // CI Tools - Gerrit
       gerritStatus, gerritExcludeWip, gerritBranch, gerritBranches,
       gerritOwner, gerritKeyword, gerritPageSize, gerritPage, gerritHasMore,
       ciGerritResults, ciGerritSearched, ciGerritDetail, buildGerritQueryPreview,
-      ciSearchGerrit, ciShowGerritDetail, gerritStatusClass, autoFillOwnerSuffix,
+      ciSearchGerrit, ciShowGerritDetail, ciRunGerritAiReview, gerritStatusClass, autoFillOwnerSuffix,
+      ciClearGerrit,
       // Existing
       toast, checkHeartbeat, executeAction, batchAction,
       submitBuild, submitCherry, submitCustom, submitJenkins,
